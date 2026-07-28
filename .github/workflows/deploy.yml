@@ -52,6 +52,19 @@ jobs:
       # OIDC -> SSM (pas de clé SSH statique). AWS-RunShellScript tourne en root :
       # il installe chaque artefact privilégié depuis le BLOB GIT COMMITÉ — jamais
       # par cp depuis l'arbre django (§3.10 / §3.11) — puis lance deploy.sh en django.
+      - name: Debug OIDC claims (TEMPORAIRE — à retirer)
+        run: |
+          python3 - <<'PY'
+          import base64, json, os, urllib.request
+          url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=sts.amazonaws.com"
+          req = urllib.request.Request(url, headers={"Authorization": "bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]})
+          token = json.load(urllib.request.urlopen(req))["value"]
+          payload = token.split(".")[1]
+          payload += "=" * (-len(payload) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(payload))
+          print(json.dumps({k: claims.get(k) for k in ("sub", "aud", "repository", "environment", "ref")}, indent=2))
+          PY
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v6
         with:
