@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Redéploiement manuel sans commit factice (`gh workflow run deploy.yml --ref main`).
+  workflow_dispatch:
 
 concurrency:
   # Clé sur la ref : les runs de PR ne font jamais la queue derrière un deploy de main.
