@@ -89,3 +89,90 @@ def test_a_trialing_subscription_grants_access(app, plan_essai):
 
     assert ent.is_paid is True
     assert ent.quotas == {"applications": 1}
+
+
+# ------------------------------------ ajustement de la quantite sur la page Stripe
+
+@pytest.mark.django_db
+def test_the_customer_can_adjust_the_quantity_on_the_checkout_page(app, signed_post, settings):
+    """« Prendre plusieurs fois » se fait sur la page Stripe, sans repasser par l'app."""
+    from unittest.mock import patch
+
+    settings.STRIPE_TEST_SECRET_KEY = "sk_test_factice"
+    settings.STRIPE_LIVE_MODE = False
+    Plan.objects.create(app=app, code="app", name="Par app", per_unit_quota_key="applications")
+    prix = MagicMock(id="price_unit")
+    stripe = MagicMock()
+    stripe.checkout.Session.create.return_value = MagicMock(url="https://checkout.stripe.com/c/x")
+
+    with patch.object(Plan, "price_for", return_value=prix), patch(
+        "core.api_views.stripe_client", return_value=stripe
+    ), patch("core.api_views.trial_days_for", return_value=0):
+        signed_post(
+            "/api/v1/checkout/",
+            {"external_user_id": "42", "plan": "app", "interval": "monthly",
+             "success_url": "https://poker.foxugly.com/ok",
+             "cancel_url": "https://poker.foxugly.com/ko"},
+            app,
+        )
+
+    ligne = stripe.checkout.Session.create.call_args.kwargs["line_items"][0]
+    assert ligne["adjustable_quantity"]["enabled"] is True
+    assert ligne["adjustable_quantity"]["minimum"] == 1
+
+
+@pytest.mark.django_db
+def test_the_quantity_is_locked_during_a_trial(app, signed_post, settings):
+    """Sinon l'essai — accordé pour UNE application — se monterait à cinquante sur
+    la page de paiement, et la garde ne servirait à rien."""
+    from unittest.mock import patch
+
+    settings.STRIPE_TEST_SECRET_KEY = "sk_test_factice"
+    settings.STRIPE_LIVE_MODE = False
+    Plan.objects.create(app=app, code="app", name="Par app",
+                        per_unit_quota_key="applications", trial_days=30)
+    prix = MagicMock(id="price_unit")
+    stripe = MagicMock()
+    stripe.checkout.Session.create.return_value = MagicMock(url="https://checkout.stripe.com/c/x")
+
+    with patch.object(Plan, "price_for", return_value=prix), patch(
+        "core.api_views.stripe_client", return_value=stripe
+    ), patch("core.api_views.trial_days_for", return_value=30):
+        signed_post(
+            "/api/v1/checkout/",
+            {"external_user_id": "42", "plan": "app", "interval": "monthly",
+             "success_url": "https://poker.foxugly.com/ok",
+             "cancel_url": "https://poker.foxugly.com/ko"},
+            app,
+        )
+
+    params = stripe.checkout.Session.create.call_args.kwargs
+    assert params["subscription_data"] == {"trial_period_days": 30}
+    assert "adjustable_quantity" not in params["line_items"][0]
+    assert params["line_items"][0]["quantity"] == 1
+
+
+@pytest.mark.django_db
+def test_a_flat_plan_is_never_adjustable(app, signed_post, settings):
+    """Prendre deux fois l'illimité n'aurait aucun sens."""
+    from unittest.mock import patch
+
+    settings.STRIPE_TEST_SECRET_KEY = "sk_test_factice"
+    settings.STRIPE_LIVE_MODE = False
+    Plan.objects.create(app=app, code="unlimited", name="Illimité", quotas={"applications": 10000})
+    prix = MagicMock(id="price_flat")
+    stripe = MagicMock()
+    stripe.checkout.Session.create.return_value = MagicMock(url="https://checkout.stripe.com/c/x")
+
+    with patch.object(Plan, "price_for", return_value=prix), patch(
+        "core.api_views.stripe_client", return_value=stripe
+    ), patch("core.api_views.trial_days_for", return_value=0):
+        signed_post(
+            "/api/v1/checkout/",
+            {"external_user_id": "42", "plan": "unlimited", "interval": "monthly",
+             "success_url": "https://poker.foxugly.com/ok",
+             "cancel_url": "https://poker.foxugly.com/ko"},
+            app,
+        )
+
+    assert "adjustable_quantity" not in stripe.checkout.Session.create.call_args.kwargs["line_items"][0]
