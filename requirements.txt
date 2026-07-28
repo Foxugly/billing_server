@@ -5,7 +5,11 @@ django-cors-headers==4.9.0
 django-environ==0.13.0
 psycopg[binary]>=3.2,<4
 drf-spectacular==0.29.0
+# dj-stripe apporte et épingle lui-même le SDK stripe : ne pas le contraindre ici.
 dj-stripe==2.11.0
+celery==5.6.3
+redis==7.4.0
+requests>=2.32,<3
 sentry-sdk[django]>=2.20,<3
 gunicorn==23.0.0
 django-extensions>=4,<5

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import environ
+from celery.schedules import crontab
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -125,6 +126,42 @@ DJSTRIPE_FOREIGN_KEY_TO_FIELD = "id"
 # Jours de grâce accordés après un échec de paiement avant de fermer l'accès (§6.6).
 # 0 désactive la grâce. Réglable en SSM sans redéploiement.
 BILLING_GRACE_DAYS = env.int("BILLING_GRACE_DAYS", default=7)
+
+# --- Redis : broker Celery (db4) et cache Django (db5) ---------------------------
+# db0 à db3 sont déjà pris sur la box (dont db3 par les Channels de Poker).
+REDIS_URL = env("REDIS_URL", default="")
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL or "memory://")
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="")
+CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=not REDIS_URL)
+CELERY_TIMEZONE = TIME_ZONE
+
+CELERY_BEAT_SCHEDULE = {
+    # Reprend les livraisons dont l'échéance est passée. Sans ce balayage, une
+    # reprise reposerait sur un `countdown` Celery, perdu au redémarrage du worker.
+    "flush-pending-deliveries": {
+        "task": "core.flush_pending_deliveries",
+        "schedule": 300.0,
+    },
+    # Filet de sécurité : recalcule tout et repousse les écarts (§6.4).
+    "reconcile-entitlements": {
+        "task": "core.reconcile_entitlements",
+        "schedule": crontab(hour=4, minute=30),
+    },
+}
+
+# L'anti-rejeu des signatures HMAC s'appuie sur ce cache : il DOIT être partagé
+# entre les workers gunicorn. Avec LocMem (par processus), un rejeu passerait une
+# fois par worker — la protection serait cosmétique. En dev/test, sans Redis, on
+# retombe sur LocMem : mono-processus, donc correct.
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL.rsplit("/", 1)[0] + "/5",
+        }
+    }
+else:
+    CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

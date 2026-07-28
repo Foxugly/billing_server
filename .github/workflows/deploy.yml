@@ -73,11 +73,11 @@ jobs:
             "sudo -u django bash -c 'umask 027; cd '$APP' && git fetch --quiet origin main && git reset --hard --quiet origin/main'",
             "git -C $APP show origin/main:deploy/fetch-env-from-ssm.sh > /usr/local/sbin/billing-env-fetch.sh",
             "chown root:root /usr/local/sbin/billing-env-fetch.sh && chmod 0755 /usr/local/sbin/billing-env-fetch.sh",
-            "for u in billing-env-fetch billing-gunicorn; do git -C $APP show origin/main:deploy/systemd/$u.service > /etc/systemd/system/$u.service; done",
+            "for u in billing-env-fetch billing-gunicorn billing-celery billing-celery-beat; do git -C $APP show origin/main:deploy/systemd/$u.service > /etc/systemd/system/$u.service; done",
             "git -C $APP show origin/main:deploy/nginx/billing-api.conf > /etc/nginx/sites-available/billing-api.conf",
             "ln -sf ../sites-available/billing-api.conf /etc/nginx/sites-enabled/billing-api.conf",
             "systemctl daemon-reload",
-            "systemctl enable billing-env-fetch billing-gunicorn",
+            "systemctl enable billing-env-fetch billing-gunicorn billing-celery billing-celery-beat",
             "systemctl restart billing-env-fetch",
             "sudo -u django bash $APP/deploy/deploy.sh",
             "nginx -t && systemctl reload nginx"

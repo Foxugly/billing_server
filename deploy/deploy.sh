@@ -42,5 +42,7 @@ chmod -R g-w,o-rwx "$APP_DIR"
 
 echo ">>> Restarting services..."
 sudo /bin/systemctl restart billing-gunicorn
+sudo /bin/systemctl restart billing-celery
+sudo /bin/systemctl restart billing-celery-beat
 
 echo ">>> Deploy complete."
