@@ -1,0 +1,12 @@
+Django==6.0.6
+djangorestframework==3.17.1
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.9.0
+django-environ==0.13.0
+psycopg[binary]>=3.2,<4
+drf-spectacular==0.29.0
+sentry-sdk[django]>=2.20,<3
+gunicorn==23.0.0
+django-extensions>=4,<5
+pytest>=8.3,<9
+pytest-django==4.12.0
