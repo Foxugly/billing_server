@@ -6,14 +6,17 @@ connaît l'identité de son utilisateur — le central ne fait que lui faire con
 signature à l'appui.
 """
 import logging
+from datetime import datetime
 
+from django.utils.timezone import get_current_timezone
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import AppCustomer, Entitlement, Plan
 from .permissions import HasValidAppSignature
-from .services import recompute_entitlement
+from .services import period_end_of, recompute_entitlement
+from .webhooks import plan_for_price, price_id_of, quantity_of
 from .stripe_gateway import (
     active_subscription_for,
     apply_quantity_change,
@@ -245,15 +248,7 @@ class HistoryView(SignedServiceView):
         if customer is None or customer.customer is None:
             return Response({"subscriptions": [], "invoices": []})
 
-        subscriptions = [
-            {
-                "id": sub.id,
-                "status": sub.status,
-                "current_period_end": None,
-                "canceled_at": sub.canceled_at.isoformat() if sub.canceled_at else None,
-            }
-            for sub in customer.customer.subscriptions.all()
-        ]
+        subscriptions = [self._serialize_subscription(app, sub) for sub in customer.customer.subscriptions.all()]
         invoices = [
             {
                 "id": inv.id,
@@ -268,6 +263,36 @@ class HistoryView(SignedServiceView):
             for inv in customer.customer.invoices.all()
         ]
         return Response({"subscriptions": subscriptions, "invoices": invoices})
+
+    @staticmethod
+    def _serialize_subscription(app, sub):
+        """Ce que l'utilisateur doit pouvoir relire d'un abonnement passé.
+
+        Sans le plan, l'intervalle, la quantité et les dates, la page d'historique
+        n'affiche qu'une colonne de tirets — on ne peut pas dire qu'on est
+        transparent sur la facturation en montrant ça. Tout se lit dans
+        `stripe_data` : en dj-stripe 2.11 la plupart des champs Stripe n'ont pas
+        de colonne dédiée.
+        """
+        data = sub.stripe_data or {}
+        plan, interval = plan_for_price(app, price_id_of(data))
+        period_end = period_end_of(data)
+        started = data.get("start_date")
+        return {
+            "id": sub.id,
+            "status": sub.status,
+            "plan": plan.code if plan else "",
+            "plan_name": plan.name if plan else "",
+            "interval": interval,
+            "quantity": quantity_of(data),
+            "started_at": (
+                datetime.fromtimestamp(started, tz=get_current_timezone()).isoformat()
+                if started
+                else None
+            ),
+            "current_period_end": period_end.isoformat() if period_end else None,
+            "canceled_at": sub.canceled_at.isoformat() if sub.canceled_at else None,
+        }
 
 
 class QuantityView(SignedServiceView):
