@@ -4,20 +4,25 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 
+# Domaine de documentation (RFC 2606) et littéral explicite : un email au domaine
+# de l'entreprise accolé à un "password=" déclenche les scanners de secrets, et une
+# alerte qu'on apprend à ignorer ne sert plus le jour où elle est vraie.
+TEST_PASSWORD = "pytest-only-not-a-real-credential"
+
 
 @pytest.mark.django_db
 def test_create_user_keys_on_email():
-    user = User.objects.create_user(email="ops@foxugly.com", password="s3cret!")
+    user = User.objects.create_user(email="ops@example.com", password=TEST_PASSWORD)
 
-    assert user.email == "ops@foxugly.com"
-    assert user.check_password("s3cret!")
+    assert user.email == "ops@example.com"
+    assert user.check_password(TEST_PASSWORD)
     assert user.is_staff is False
     assert user.is_superuser is False
 
 
 @pytest.mark.django_db
 def test_create_superuser_is_staff_and_superuser():
-    user = User.objects.create_superuser(email="boss@foxugly.com", password="s3cret!")
+    user = User.objects.create_superuser(email="boss@example.com", password=TEST_PASSWORD)
 
     assert user.is_staff is True
     assert user.is_superuser is True
@@ -32,13 +37,13 @@ def test_email_is_the_username_field_and_has_no_username_column():
 
 @pytest.mark.django_db
 def test_email_is_unique():
-    User.objects.create_user(email="dup@foxugly.com", password="x")
+    User.objects.create_user(email="dup@example.com", password=TEST_PASSWORD)
 
     with pytest.raises(Exception):
-        User.objects.create_user(email="dup@foxugly.com", password="x")
+        User.objects.create_user(email="dup@example.com", password=TEST_PASSWORD)
 
 
 @pytest.mark.django_db
 def test_email_is_required():
     with pytest.raises(ValueError):
-        User.objects.create_user(email="", password="x")
+        User.objects.create_user(email="", password=TEST_PASSWORD)
