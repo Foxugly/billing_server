@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 from .models import AppCustomer, Entitlement, Plan
 from .permissions import HasValidAppSignature
 from .services import recompute_entitlement
-from .stripe_gateway import stripe_client, stripe_configured, url_is_allowed_for
+from .stripe_gateway import stripe_client, stripe_configured, trial_days_for, url_is_allowed_for
 
 logger = logging.getLogger("billing")
 
@@ -162,6 +162,10 @@ class CheckoutView(SignedServiceView):
             "customer_update": {"address": "auto"},
             "tax_id_collection": {"enabled": True},
         }
+        essai = trial_days_for(stripe, plan, customer, quantity)
+        if essai:
+            params["subscription_data"] = {"trial_period_days": essai}
+
         if customer.customer_id:
             params["customer"] = customer.customer_id
         elif email:

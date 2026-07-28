@@ -53,3 +53,33 @@ def url_is_allowed_for(app, url: str) -> bool:
     parent = api_host.split(".", 1)[1] if "." in api_host else api_host
 
     return host in allowed_hosts or (parent and host.endswith("." + parent))
+
+
+def trial_days_for(stripe, plan, customer, quantity: int) -> int:
+    """Jours d'essai à accorder pour cette souscription. 0 = aucun.
+
+    Trois conditions cumulatives, décidées le 2026-07-28 :
+    - le plan en propose un (`trial_days`) ;
+    - la quantité vaut 1 — sinon on offrirait cinquante applications pendant un mois ;
+    - le client n'a **jamais** eu d'abonnement — sinon il suffirait de résilier et de
+      se réabonner pour être gratuit à perpétuité.
+
+    L'antériorité est vérifiée chez Stripe et non dans le miroir local : un webhook
+    manqué rendrait le miroir incomplet, et offrirait un essai déjà consommé.
+    """
+    if not plan.trial_days or int(quantity or 1) != 1:
+        return 0
+
+    customer_id = getattr(customer, "customer_id", None) if customer else None
+    if not customer_id:
+        return plan.trial_days  # jamais vu chez Stripe : premier abonnement
+
+    try:
+        anterieurs = stripe.Subscription.list(customer=customer_id, status="all", limit=1)
+    except Exception:
+        # En cas de doute on n'offre pas : mieux vaut un essai refuse a tort qu'un
+        # essai offert en boucle.
+        logger.warning("trial_check_failed", extra={"customer": customer_id})
+        return 0
+
+    return 0 if anterieurs.get("data") else plan.trial_days

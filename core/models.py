@@ -94,6 +94,13 @@ class Plan(models.Model):
             "Laisser vide pour un plan forfaitaire."
         ),
     )
+    trial_days = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            "Jours d'essai offerts à la première souscription. 0 = aucun essai. "
+            "L'essai n'est accordé qu'une fois par client et pour une quantité de 1."
+        ),
+    )
     sort_order = models.PositiveIntegerField(default=0)
     public = models.BooleanField(default=True, help_text="Décoché : masqué du catalogue de l'app.")
     active = models.BooleanField(default=True)
