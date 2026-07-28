@@ -6,5 +6,6 @@ class CoreConfig(AppConfig):
     name = "core"
 
     def ready(self):
-        # Importe le module pour que les décorateurs @djstripe_receiver s'enregistrent.
-        from . import webhooks  # noqa: F401
+        # Importe les modules pour leurs effets de bord : enregistrement des
+        # décorateurs @djstripe_receiver, et des system checks de configuration.
+        from . import checks, webhooks  # noqa: F401

@@ -9,10 +9,14 @@ Group=www-data
 UMask=0027
 WorkingDirectory=/var/www/django_websites/billing_server
 EnvironmentFile=/run/billing/.env
-# Le fichier de planification vit sous /run : jamais dans l'arbre django, et
-# reconstruit à chaque démarrage — un schedule périmé est pire qu'absent.
+# /run/billing appartient à root (750 root:www-data) : django peut le traverser
+# mais PAS y écrire — c'est le modèle §3.5, et beat doit écrire son fichier de
+# planification. systemd crée donc un répertoire dédié, possédé par le service.
+# Il est recréé à chaque démarrage : un schedule périmé est pire qu'absent.
+RuntimeDirectory=billing-beat
+RuntimeDirectoryMode=0750
 ExecStart=/var/www/django_websites/billing_server/.venv/bin/celery -A config beat -l info \
-    --schedule /run/billing/celerybeat-schedule
+    --schedule /run/billing-beat/schedule
 Restart=always
 RestartSec=5
 KillMode=mixed
