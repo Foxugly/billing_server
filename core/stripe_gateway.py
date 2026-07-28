@@ -83,3 +83,60 @@ def trial_days_for(stripe, plan, customer, quantity: int) -> int:
         return 0
 
     return 0 if anterieurs.get("data") else plan.trial_days
+
+
+def active_subscription_for(stripe, customer_id: str):
+    """L'abonnement en cours d'un client, ou None.
+
+    `status="all"` puis filtrage : un abonnement en essai (`trialing`) doit être
+    modifiable comme un autre, et Stripe ne le range pas sous `active`.
+    """
+    if not customer_id:
+        return None
+    subs = stripe.Subscription.list(customer=customer_id, status="all", limit=20).get("data", [])
+    vivants = [s for s in subs if s.get("status") in ("active", "trialing", "past_due")]
+    return vivants[0] if vivants else None
+
+
+def first_item_of(subscription):
+    """(id de l'item, quantité) du premier item d'un abonnement."""
+    try:
+        item = subscription["items"]["data"][0]
+        return item["id"], int(item.get("quantity") or 1)
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None, 1
+
+
+def preview_quantity_change(stripe, subscription, quantity: int) -> dict:
+    """Ce que coûterait le passage à `quantity`, AVANT de l'appliquer.
+
+    On ne modifie jamais un abonnement sans avoir pu annoncer le montant : le
+    prorata d'un changement en cours de période n'est pas devinable par le client.
+    """
+    item_id, quantite_actuelle = first_item_of(subscription)
+    apercu = stripe.Invoice.create_preview(
+        customer=subscription["customer"],
+        subscription=subscription["id"],
+        subscription_details={
+            "items": [{"id": item_id, "quantity": quantity}],
+            "proration_behavior": "create_prorations",
+        },
+    )
+    return {
+        "current_quantity": quantite_actuelle,
+        "new_quantity": quantity,
+        # Ce qui sera preleve (ou credite) tout de suite, au prorata.
+        "amount_due_now": apercu.get("amount_due", 0),
+        "currency": (apercu.get("currency") or "").upper(),
+        "next_renewal": apercu.get("next_payment_attempt") or apercu.get("period_end"),
+    }
+
+
+def apply_quantity_change(stripe, subscription, quantity: int):
+    """Applique le changement de quantité, avec prorata."""
+    item_id, _ = first_item_of(subscription)
+    return stripe.Subscription.modify(
+        subscription["id"],
+        items=[{"id": item_id, "quantity": quantity}],
+        proration_behavior="create_prorations",
+    )
