@@ -1,0 +1,38 @@
+name: Test & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  # Clé sur la ref : les runs de PR ne font jamais la queue derrière un deploy de main.
+  group: deploy-production-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          # 3.12 = la version de la box (Python 3.12.3). Ne pas monter sans migrer la box.
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check for missing migrations
+        env:
+          STATE: TEST
+          SECRET_KEY: test-secret-key
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Run tests
+        env:
+          STATE: TEST
+          SECRET_KEY: test-secret-key
+        run: pytest -q
