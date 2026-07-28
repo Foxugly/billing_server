@@ -279,3 +279,27 @@ def test_checkout_forwards_the_requested_quantity(app, plan, signed_post, stripe
     params = fake_stripe.checkout.Session.create.call_args.kwargs
     assert params["line_items"][0]["quantity"] == 5
     assert params["metadata"]["quantity"] == "5"
+
+
+@pytest.mark.django_db
+def test_the_catalogue_announces_the_trial_so_an_app_can_display_it(app, signed_get):
+    """Sans ce champ, une app consommatrice ne peut pas annoncer « 1er mois
+    offert » avant l'achat — elle le devinerait ou le tairait."""
+    from djstripe.models import Price, Product
+
+    produit = Product.objects.create(id="prod_app", name="Par application")
+    # En dj-stripe 2.11 `unit_amount` et `currency` sont lus depuis stripe_data,
+    # pas depuis des colonnes : les passer en kwargs leverait un AttributeError.
+    prix = Price.objects.create(
+        id="price_app_m", active=True, currency="eur", product=produit,
+        stripe_data={"id": "price_app_m", "unit_amount": 200, "currency": "eur"},
+    )
+    Plan.objects.create(
+        app=app, code="app", name="Par application", trial_days=30, price_monthly=prix
+    )
+
+    payload = signed_get("/api/v1/plans/", app).json()
+
+    assert [p["code"] for p in payload] == ["app"]
+    assert payload[0]["trial_days"] == 30
+    assert payload[0]["prices"]["monthly"] == {"id": "price_app_m", "amount": 200, "currency": "EUR"}
