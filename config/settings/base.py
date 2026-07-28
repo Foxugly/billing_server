@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
+    "accounts.apps.AccountsConfig",
     "health.apps.HealthConfig",
 ]
 
@@ -101,6 +102,10 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Utilisateur email-only (OPERATIONS.md §3.16). Posé AVANT le premier migrate :
+# changer AUTH_USER_MODEL sur une base existante impose un runbook SQL manuel.
+AUTH_USER_MODEL = "accounts.User"
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
