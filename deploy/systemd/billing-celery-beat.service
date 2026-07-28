@@ -1,0 +1,23 @@
+[Unit]
+Description=Foxugly Billing — Celery beat (reprises et réconciliation)
+After=network.target billing-env-fetch.service redis-server.service billing-celery.service
+Requires=billing-env-fetch.service
+
+[Service]
+User=django
+Group=www-data
+UMask=0027
+WorkingDirectory=/var/www/django_websites/billing_server
+EnvironmentFile=/run/billing/.env
+# Le fichier de planification vit sous /run : jamais dans l'arbre django, et
+# reconstruit à chaque démarrage — un schedule périmé est pire qu'absent.
+ExecStart=/var/www/django_websites/billing_server/.venv/bin/celery -A config beat -l info \
+    --schedule /run/billing/celerybeat-schedule
+Restart=always
+RestartSec=5
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

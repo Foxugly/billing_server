@@ -33,6 +33,10 @@ class App(models.Model):
         help_text="Chemin du endpoint qui reçoit les droits poussés.",
     )
     shared_secret = models.CharField(max_length=100, default=generate_shared_secret)
+    previous_shared_secret = models.CharField(
+        max_length=100, blank=True, help_text="Accepté pendant 24 h après une rotation."
+    )
+    secret_rotated_at = models.DateTimeField(null=True, blank=True)
     active = models.BooleanField(default=True, help_text="Décoché : plus aucune livraison n'est émise.")
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -41,6 +45,18 @@ class App(models.Model):
 
     def __str__(self):
         return self.slug
+
+    def rotate_secret(self) -> str:
+        """Génère un nouveau secret et conserve l'ancien le temps que l'app suive.
+
+        Sans ce sursis, la rotation couperait le service entre l'instant où le
+        central change de secret et celui où l'application redéploie le sien.
+        """
+        self.previous_shared_secret = self.shared_secret
+        self.shared_secret = generate_shared_secret()
+        self.secret_rotated_at = timezone.now()
+        self.save(update_fields=["shared_secret", "previous_shared_secret", "secret_rotated_at"])
+        return self.shared_secret
 
     @property
     def entitlement_url(self) -> str:

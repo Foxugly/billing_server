@@ -93,9 +93,15 @@ def handle_subscription_event(obj):
         period_end=period_end_of(obj),
         stripe_customer_id=obj.get("customer") or "",
     )
-    return EntitlementDelivery.objects.create(
+    delivery = EntitlementDelivery.objects.create(
         entitlement=entitlement, payload=entitlement.payload()
     )
+    # Asynchrone : un webhook Stripe ne doit jamais échouer parce qu'un site de la
+    # flotte est injoignable. dj-stripe a déjà répondu 200 à Stripe à ce stade.
+    from .tasks import deliver_entitlement
+
+    deliver_entitlement.delay(str(delivery.pk))
+    return delivery
 
 
 @djstripe_receiver(SUBSCRIPTION_EVENTS)
