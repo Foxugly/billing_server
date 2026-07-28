@@ -3,6 +3,10 @@ from django.contrib.admin.sites import site
 
 from core.models import App, AppCustomer, Entitlement, EntitlementDelivery, Plan
 
+# Domaine de documentation (RFC 2606) : un email au domaine de l'entreprise accolé
+# à un "password=" déclenche les scanners de secrets pour rien.
+TEST_PASSWORD = "pytest-only-not-a-real-credential"
+
 
 @pytest.mark.parametrize("model", [App, Plan, AppCustomer, Entitlement, EntitlementDelivery])
 def test_every_business_model_is_registered_in_the_admin(model):
@@ -23,7 +27,7 @@ def test_derived_entitlement_fields_are_read_only():
 
 @pytest.mark.django_db
 def test_admin_index_is_reachable_by_a_staff_user(client, django_user_model):
-    user = django_user_model.objects.create_superuser(email="ops@foxugly.com", password="x")
+    user = django_user_model.objects.create_superuser(email="ops@example.com", password=TEST_PASSWORD)
     client.force_login(user)
 
     assert client.get("/admin/").status_code == 200
