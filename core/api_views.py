@@ -90,6 +90,12 @@ class PlansView(SignedServiceView):
                     "description": plan.description,
                     "quotas": plan.quotas,
                     "per_unit_quota_key": plan.per_unit_quota_key,
+                    # Sans ça, une app consommatrice ne peut pas annoncer l'essai
+                    # avant l'achat. Ce n'est PAS l'essai auquel ce client-ci a
+                    # droit — il n'est accordé qu'à une première souscription
+                    # d'une seule unité (cf. `trial_days_for`) — mais le montant
+                    # exact reste affiché par Stripe Checkout avant paiement.
+                    "trial_days": plan.trial_days,
                     "prices": prices,
                 }
             )
