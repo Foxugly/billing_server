@@ -49,6 +49,7 @@ def recompute_entitlement(
     interval="",
     period_end=None,
     stripe_customer_id="",
+    quantity=1,
 ):
     """Recalcule et persiste le droit d'un utilisateur. Renvoie l'Entitlement.
 
@@ -79,7 +80,8 @@ def recompute_entitlement(
     ent.grace_until = grace_until
     ent.plan_code = plan.code if plan else ""
     ent.interval = interval if plan else ""
-    ent.quotas = plan.quotas if (plan and is_paid) else {}
+    # quotas_for() fait suivre la quantite pour les plans factures a l'unite.
+    ent.quotas = plan.quotas_for(quantity) if (plan and is_paid) else {}
     ent.current_period_end = period_end
     # Jamais écrasé par du vide : un événement ultérieur peut ne pas le porter,
     # et on perdrait le lien vers le portail client.

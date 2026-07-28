@@ -85,6 +85,15 @@ class Plan(models.Model):
         "djstripe.Price", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     quotas = models.JSONField(default=dict, help_text='Poussé tel quel à l\'app, ex. {"teams": 1}')
+    per_unit_quota_key = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text=(
+            "Si renseigné, le quota de cette clé suit la QUANTITÉ souscrite au lieu "
+            "d'être fixe : 3 exemplaires d'un plan à 2 €/app donnent 3 applications. "
+            "Laisser vide pour un plan forfaitaire."
+        ),
+    )
     sort_order = models.PositiveIntegerField(default=0)
     public = models.BooleanField(default=True, help_text="Décoché : masqué du catalogue de l'app.")
     active = models.BooleanField(default=True)
@@ -99,6 +108,19 @@ class Plan(models.Model):
     def price_for(self, interval: str):
         """Le Price Stripe pour un intervalle, ou None si non configuré."""
         return {self.MONTHLY: self.price_monthly, self.YEARLY: self.price_yearly}.get(interval)
+
+    def quotas_for(self, quantity: int) -> dict:
+        """Les quotas effectifs pour une quantité souscrite.
+
+        Un plan forfaitaire ignore la quantité : « illimité » reste illimité qu'on
+        en prenne un ou trois. Un plan à l'unité, lui, fait suivre le quota — sans
+        quoi payer pour cinq applications n'en débloquerait qu'une.
+        """
+        if not self.per_unit_quota_key:
+            return dict(self.quotas or {})
+        quotas = dict(self.quotas or {})
+        quotas[self.per_unit_quota_key] = max(1, int(quantity or 1))
+        return quotas
 
 
 class AppCustomer(models.Model):

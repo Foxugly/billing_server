@@ -77,6 +77,7 @@ class PlansView(SignedServiceView):
                     "name": plan.name,
                     "description": plan.description,
                     "quotas": plan.quotas,
+                    "per_unit_quota_key": plan.per_unit_quota_key,
                     "prices": prices,
                 }
             )
@@ -117,6 +118,7 @@ class CheckoutView(SignedServiceView):
         email = data.get("email") or ""
         plan_code = data.get("plan")
         interval = data.get("interval")
+        quantity = data.get("quantity") or 1
         success_url = data.get("success_url") or ""
         cancel_url = data.get("cancel_url") or ""
 
@@ -143,12 +145,14 @@ class CheckoutView(SignedServiceView):
 
         params = {
             "mode": "subscription",
-            "line_items": [{"price": price.id, "quantity": 1}],
+            # La quantite fixe le quota pour un plan facture a l'unite.
+            "line_items": [{"price": price.id, "quantity": max(1, int(quantity))}],
             "client_reference_id": f"{app.slug}:{external_user_id}",
             "metadata": {
                 "app": app.slug,
                 "external_user_id": external_user_id,
                 "plan": plan.code,
+                "quantity": str(max(1, int(quantity))),
             },
             "success_url": success_url,
             "cancel_url": cancel_url,
