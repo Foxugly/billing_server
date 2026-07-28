@@ -131,3 +131,18 @@ def reconcile_entitlements():
 
     examined, changed, pushed = reconcile(push_diff=True)
     return {"examined": examined, "changed": changed, "pushed": pushed}
+
+
+def ping_app(app):
+    """Teste la connectivité et le secret vers une app. Renvoie (ok, détail).
+
+    Appelé depuis la console : le test part du serveur, qui détient le secret —
+    il ne doit jamais atteindre un bundle SPA.
+    """
+    body = json.dumps({"ping": True}).encode()
+    try:
+        response = _post_signed(app, body)
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    ok = 200 <= response.status_code < 300
+    return ok, f"HTTP {response.status_code}"
