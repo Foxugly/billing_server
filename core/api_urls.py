@@ -7,6 +7,7 @@ from .api_views import (
     PingView,
     PlansView,
     PortalView,
+    QuantityView,
 )
 
 
@@ -18,6 +19,8 @@ urlpatterns = [
     path("checkout/", CheckoutView.as_view(), name="checkout"),
     path("portal/", PortalView.as_view(), name="portal"),
     path("history/", HistoryView.as_view(), name="history"),
+    path("quantity/preview/", QuantityView.as_view(), {"action": "preview"}, name="quantity-preview"),
+    path("quantity/", QuantityView.as_view(), name="quantity"),
     path(
         "entitlements/<slug:app_slug>/<str:external_user_id>/",
         EntitlementView.as_view(),

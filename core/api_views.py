@@ -14,7 +14,15 @@ from rest_framework.views import APIView
 from .models import AppCustomer, Entitlement, Plan
 from .permissions import HasValidAppSignature
 from .services import recompute_entitlement
-from .stripe_gateway import stripe_client, stripe_configured, trial_days_for, url_is_allowed_for
+from .stripe_gateway import (
+    active_subscription_for,
+    apply_quantity_change,
+    preview_quantity_change,
+    stripe_client,
+    stripe_configured,
+    trial_days_for,
+    url_is_allowed_for,
+)
 
 logger = logging.getLogger("billing")
 
@@ -254,3 +262,52 @@ class HistoryView(SignedServiceView):
             for inv in customer.customer.invoices.all()
         ]
         return Response({"subscriptions": subscriptions, "invoices": invoices})
+
+
+class QuantityView(SignedServiceView):
+    """Change le nombre d'exemplaires souscrits — après l'avoir annoncé.
+
+    Deux temps volontairement séparés :
+    - `POST /quantity/preview/` dit ce que ça coûtera, sans rien modifier ;
+    - `POST /quantity/` applique.
+
+    On ne modifie jamais un abonnement sans que le client ait pu voir le montant :
+    le prorata d'un changement en cours de période n'est pas devinable, et une
+    facture surprise est le meilleur moyen de perdre un client qui payait.
+    """
+
+    def post(self, request, action=None):
+        app = request.billing_app
+        stripe = stripe_client()
+        if stripe is None:
+            return error("billing_unconfigured", "Stripe n'est pas configuré.", status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        external_user_id = str(request.data.get("external_user_id") or "")
+        try:
+            quantity = int(request.data.get("quantity"))
+        except (TypeError, ValueError):
+            return error("bad_quantity", "quantity doit être un entier.", status.HTTP_400_BAD_REQUEST)
+        if quantity < 1 or quantity > MAX_UNITS_PER_CHECKOUT:
+            return error(
+                "bad_quantity",
+                f"quantity doit être compris entre 1 et {MAX_UNITS_PER_CHECKOUT}.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        entitlement = Entitlement.objects.filter(app=app, external_user_id=external_user_id).first()
+        customer_id = entitlement.stripe_customer_id if entitlement else ""
+        subscription = active_subscription_for(stripe, customer_id)
+        if subscription is None:
+            return error("no_subscription", "Aucun abonnement à modifier.", status.HTTP_400_BAD_REQUEST)
+
+        if action == "preview":
+            return Response(preview_quantity_change(stripe, subscription, quantity))
+
+        apply_quantity_change(stripe, subscription, quantity)
+        # Le webhook customer.subscription.updated recalculera et poussera le droit ;
+        # on ne duplique pas ce calcul ici pour éviter deux vérités concurrentes.
+        logger.info(
+            "quantity_changed",
+            extra={"app": app.slug, "user": external_user_id, "quantity": quantity},
+        )
+        return Response({"quantity": quantity, "status": "applied"})
