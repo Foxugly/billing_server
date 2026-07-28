@@ -123,6 +123,20 @@ SPECTACULAR_SETTINGS = {
     "COMPONENT_SPLIT_REQUEST": True,
 }
 
+# --- Sentry : actif uniquement sous STATE=PROD (§3.8). Le DSN est un String en
+# SSM, pas un SecureString : il est de toute façon embarqué dans les bundles SPA.
+SENTRY_DSN = env("SENTRY_DSN", default="")
+
+if STATE == "PROD" and SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=env("SENTRY_ENVIRONMENT", default="production"),
+        traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0),
+        send_default_pii=False,
+    )
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
