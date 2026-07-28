@@ -1,7 +1,7 @@
 """API de la console d'exploitation — réservée aux opérateurs (`is_staff`).
 
 Rien ici n'est atteignable par une application de la flotte : l'API
-service-à-service (`/api/v1/`) et cette API-ci (`/api/admin/`) ont des
+service-à-service (`/api/v1/`) et cette API-ci (`/api/v1/admin/`) ont des
 authentifications entièrement disjointes — signature HMAC d'un côté, JWT
 d'opérateur de l'autre. Une app compromise ne peut donc pas lire la facturation
 des autres sites.
