@@ -60,7 +60,8 @@ flotte reste maître de son propre gating fonctionnel, mais ne parle plus jamais
 | TVA | **Stripe Tax activé** (calcul, collecte, OSS, factures conformes). |
 | Relation avec l'app billing de Poker | Le central devient le seul à parler à Stripe ; l'app Poker devient un consommateur qui garde son modèle local et son gating. |
 | Retour du Checkout | Pull synchrone au central sur `?billing=success`, pas de polling (§6.5). |
-| Échec de paiement | **7 jours de grâce** en `past_due` avant fermeture de l'accès (§6.6). |
+| Échec de paiement | Grâce en `past_due` avant fermeture — `BILLING_GRACE_DAYS`, **défaut 7**, réglable en SSM (§6.6). |
+| Sorties comptables | **PDF Stripe *et* export CSV structuré**, les deux (§16). |
 | Facturation directe (consulting) | Prévue au lot **L7** ; `AppCustomer.app` nullable posé **dès la première migration** (§5, §16). |
 | Coordonnées | Collecte email + nom + adresse + n° TVA. **Téléphone non collecté** (§17). |
 
@@ -263,10 +264,16 @@ Un `invoice.payment_failed` fait passer l'abonnement en `past_due` chez Stripe, 
 relancer la carte pendant plusieurs jours. Couper l'accès au premier échec punit un client dont
 la carte a simplement expiré.
 
-**Règle :** `is_paid` reste `True` pendant **7 jours** après l'entrée en `past_due`
-(`grace_until = computed_at + 7 j`, porté dans le payload). Passé ce délai, ou dès que Stripe
-passe l'abonnement en `canceled` / `unpaid`, `is_paid` bascule à `False`. La relance client est
-faite par Stripe (emails de recouvrement natifs) — on ne réimplémente pas de séquence d'emails.
+**Règle :** `is_paid` reste `True` pendant **`BILLING_GRACE_DAYS` jours** après l'entrée en
+`past_due` (`grace_until = computed_at + N j`, porté dans le payload). Passé ce délai, **ou** dès
+que Stripe bascule l'abonnement en `canceled` / `unpaid` (ce qui peut survenir avant), `is_paid`
+tombe à `False` et le push ferme l'accès. La relance client est faite par Stripe (emails de
+recouvrement natifs) — on ne réimplémente aucune séquence d'emails.
+
+`BILLING_GRACE_DAYS` est une variable SSM, **défaut 7**, modifiable sans redéploiement ; `0`
+désactive la grâce (fermeture au premier échec). Un beat quotidien recalcule les entitlements
+dont le `grace_until` vient d'expirer — sans lui, un abonnement en grâce ne recevrait plus aucun
+événement Stripe et resterait ouvert indéfiniment.
 
 Côté application, cela ne change rien : `PAID_STATUSES` reste `{active, trialing}` chez Poker,
 mais l'app ne décide plus — elle applique le `is_paid` reçu.
@@ -514,9 +521,11 @@ les relances d'impayés.
    B2C → règle du lieu de prestation. Stripe Tax couvre les trois **à condition** de poser le bon
    code fiscal sur chaque ligne. La console expose donc une petite liste de « catégories de
    prestation » configurables, chacune mappée sur un code fiscal Stripe.
-3. **Le comptable.** À valider avec lui : accepte-t-il les PDF Stripe comme pièces
-   justificatives, ou veut-il un export structuré ? Stripe fournit les deux. Question à trancher
-   hors projet, avant L7.
+3. **Le comptable — les deux sorties sont prévues.** La console offre à la fois le
+   téléchargement des **PDF Stripe** (pièces justificatives) et un **export structuré CSV** sur
+   une période donnée (date, numéro, client, n° TVA, HT, TVA, TTC, devise, statut, moyen de
+   paiement, app ou « direct »). Pas d'arbitrage à faire : ce qui coûte cher, c'est de devoir
+   ajouter le second après coup au moment d'une clôture.
 
 ---
 
