@@ -26,35 +26,36 @@ def app(db):
 
 
 BODY = b'{"app":"poker","external_user_id":"42"}'
+PATH = "/api/v1/checkout/"
 
 
 @pytest.mark.django_db
 def test_a_correctly_signed_payload_is_accepted(app):
     ts = int(time.time())
 
-    assert verify_signature(app, BODY, ts, sign_payload(app.shared_secret, BODY, ts)) is True
+    assert verify_signature(app, "POST", PATH, BODY, ts, sign_payload(app.shared_secret, "POST", PATH, BODY, ts)) is True
 
 
 @pytest.mark.django_db
 def test_a_wrong_secret_is_rejected(app):
     ts = int(time.time())
 
-    assert verify_signature(app, BODY, ts, sign_payload("mauvais-secret", BODY, ts)) is False
+    assert verify_signature(app, "POST", PATH, BODY, ts, sign_payload("mauvais-secret", "POST", PATH, BODY, ts)) is False
 
 
 @pytest.mark.django_db
 def test_a_single_altered_byte_invalidates_the_signature(app):
     ts = int(time.time())
-    signature = sign_payload(app.shared_secret, BODY, ts)
+    signature = sign_payload(app.shared_secret, "POST", PATH, BODY, ts)
 
-    assert verify_signature(app, BODY + b" ", ts, signature) is False
+    assert verify_signature(app, "POST", PATH, BODY + b" ", ts, signature) is False
 
 
 @pytest.mark.django_db
 def test_an_expired_timestamp_is_rejected(app):
     ts = int(time.time()) - SIGNATURE_WINDOW_SECONDS - 1
 
-    assert verify_signature(app, BODY, ts, sign_payload(app.shared_secret, BODY, ts)) is False
+    assert verify_signature(app, "POST", PATH, BODY, ts, sign_payload(app.shared_secret, "POST", PATH, BODY, ts)) is False
 
 
 @pytest.mark.django_db
@@ -62,32 +63,32 @@ def test_a_timestamp_in_the_future_is_rejected(app):
     """Aussi suspect qu'un horodatage périmé : la fenêtre est bornée des deux côtés."""
     ts = int(time.time()) + SIGNATURE_WINDOW_SECONDS + 1
 
-    assert verify_signature(app, BODY, ts, sign_payload(app.shared_secret, BODY, ts)) is False
+    assert verify_signature(app, "POST", PATH, BODY, ts, sign_payload(app.shared_secret, "POST", PATH, BODY, ts)) is False
 
 
 @pytest.mark.django_db
 def test_a_signature_cannot_be_replayed(app):
     ts = int(time.time())
-    signature = sign_payload(app.shared_secret, BODY, ts)
+    signature = sign_payload(app.shared_secret, "POST", PATH, BODY, ts)
 
-    assert verify_signature(app, BODY, ts, signature) is True
-    assert verify_signature(app, BODY, ts, signature) is False, "le rejeu doit être refusé"
+    assert verify_signature(app, "POST", PATH, BODY, ts, signature) is True
+    assert verify_signature(app, "POST", PATH, BODY, ts, signature) is False, "le rejeu doit être refusé"
 
 
 @pytest.mark.django_db
 def test_a_malformed_signature_is_rejected(app):
     ts = int(time.time())
-    digest = sign_payload(app.shared_secret, BODY, ts).removeprefix("sha256=")
+    digest = sign_payload(app.shared_secret, "POST", PATH, BODY, ts).removeprefix("sha256=")
 
-    assert verify_signature(app, BODY, ts, digest) is False, "le préfixe sha256= est requis"
-    assert verify_signature(app, BODY, ts, "") is False
-    assert verify_signature(app, BODY, ts, None) is False
+    assert verify_signature(app, "POST", PATH, BODY, ts, digest) is False, "le préfixe sha256= est requis"
+    assert verify_signature(app, "POST", PATH, BODY, ts, "") is False
+    assert verify_signature(app, "POST", PATH, BODY, ts, None) is False
 
 
 @pytest.mark.django_db
 def test_a_non_numeric_timestamp_is_rejected(app):
-    assert verify_signature(app, BODY, "hier", sign_payload(app.shared_secret, BODY, 0)) is False
-    assert verify_signature(app, BODY, None, sign_payload(app.shared_secret, BODY, 0)) is False
+    assert verify_signature(app, "POST", PATH, BODY, "hier", sign_payload(app.shared_secret, "POST", PATH, BODY, 0)) is False
+    assert verify_signature(app, "POST", PATH, BODY, None, sign_payload(app.shared_secret, "POST", PATH, BODY, 0)) is False
 
 
 @pytest.mark.django_db
@@ -97,7 +98,7 @@ def test_the_previous_secret_still_works_during_the_rotation_window(app):
     ts = int(time.time())
 
     assert app.shared_secret != old
-    assert verify_signature(app, BODY, ts, sign_payload(old, BODY, ts)) is True
+    assert verify_signature(app, "POST", PATH, BODY, ts, sign_payload(old, "POST", PATH, BODY, ts)) is True
 
 
 @pytest.mark.django_db
@@ -110,7 +111,7 @@ def test_the_previous_secret_stops_working_once_the_window_has_passed(app):
     app.save()
     ts = int(time.time())
 
-    assert verify_signature(app, BODY, ts, sign_payload(old, BODY, ts)) is False
+    assert verify_signature(app, "POST", PATH, BODY, ts, sign_payload(old, "POST", PATH, BODY, ts)) is False
 
 
 @pytest.mark.django_db
@@ -118,4 +119,46 @@ def test_the_new_secret_works_immediately_after_rotation(app):
     app.rotate_secret()
     ts = int(time.time())
 
-    assert verify_signature(app, BODY, ts, sign_payload(app.shared_secret, BODY, ts)) is True
+    assert verify_signature(app, "POST", PATH, BODY, ts, sign_payload(app.shared_secret, "POST", PATH, BODY, ts)) is True
+
+
+@pytest.mark.django_db
+def test_two_different_requests_in_the_same_second_do_not_collide(app):
+    """Sans la methode et le chemin dans la signature, deux GET a corps vide emis
+    dans la meme seconde produisaient une signature IDENTIQUE — et l'anti-rejeu
+    rejetait le second, pourtant legitime. Constate en production le 2026-07-28."""
+    ts = int(time.time())
+
+    a = sign_payload(app.shared_secret, "GET", "/api/v1/plans/", b"", ts)
+    b = sign_payload(app.shared_secret, "GET", "/api/v1/entitlements/poker/42/", b"", ts)
+
+    assert a != b
+    assert verify_signature(app, "GET", "/api/v1/plans/", b"", ts, a) is True
+    assert verify_signature(app, "GET", "/api/v1/entitlements/poker/42/", b"", ts, b) is True
+
+
+@pytest.mark.django_db
+def test_a_signature_is_not_valid_on_another_path(app):
+    """Une signature capturee pour une route ne doit pas en ouvrir une autre."""
+    ts = int(time.time())
+    sig = sign_payload(app.shared_secret, "GET", "/api/v1/plans/", b"", ts)
+
+    assert verify_signature(app, "GET", "/api/v1/entitlements/poker/42/", b"", ts, sig) is False
+
+
+@pytest.mark.django_db
+def test_a_signature_is_not_valid_for_another_method(app):
+    ts = int(time.time())
+    sig = sign_payload(app.shared_secret, "GET", PATH, b"", ts)
+
+    assert verify_signature(app, "POST", PATH, b"", ts, sig) is False
+
+
+@pytest.mark.django_db
+def test_the_query_string_is_covered(app):
+    """Les parametres d'un GET voyagent dans l'URL : les laisser hors signature
+    permettrait de lire l'historique d'un autre utilisateur."""
+    ts = int(time.time())
+    sig = sign_payload(app.shared_secret, "GET", "/api/v1/history/?external_user_id=42", b"", ts)
+
+    assert verify_signature(app, "GET", "/api/v1/history/?external_user_id=99", b"", ts, sig) is False

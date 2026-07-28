@@ -10,6 +10,7 @@ Ce chemin est **asynchrone par construction** : un webhook Stripe ne doit jamais
 import json
 import logging
 import time
+from urllib.parse import urlparse
 
 import requests
 from celery import shared_task
@@ -30,6 +31,7 @@ DELIVERY_TIMEOUT_SECONDS = 10
 
 def _post_signed(app, body: bytes):
     timestamp = int(time.time())
+    path = urlparse(app.entitlement_url).path
     return requests.post(
         app.entitlement_url,
         data=body,
@@ -38,7 +40,7 @@ def _post_signed(app, body: bytes):
             "Content-Type": "application/json",
             "X-Foxugly-App": app.slug,
             "X-Foxugly-Timestamp": str(timestamp),
-            "X-Foxugly-Signature": sign_payload(app.shared_secret, body, timestamp),
+            "X-Foxugly-Signature": sign_payload(app.shared_secret, "POST", path, body, timestamp),
         },
     )
 
