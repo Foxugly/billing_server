@@ -5,6 +5,7 @@ django-cors-headers==4.9.0
 django-environ==0.13.0
 psycopg[binary]>=3.2,<4
 drf-spectacular==0.29.0
+dj-stripe==2.11.0
 sentry-sdk[django]>=2.20,<3
 gunicorn==23.0.0
 django-extensions>=4,<5

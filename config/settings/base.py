@@ -33,7 +33,9 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
+    "djstripe",
     "accounts.apps.AccountsConfig",
+    "core.apps.CoreConfig",
     "health.apps.HealthConfig",
 ]
 
@@ -106,6 +108,23 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Utilisateur email-only (OPERATIONS.md §3.16). Posé AVANT le premier migrate :
 # changer AUTH_USER_MODEL sur une base existante impose un runbook SQL manuel.
 AUTH_USER_MODEL = "accounts.User"
+
+# --- Stripe (dj-stripe) ---------------------------------------------------------
+# Les clés sont absentes en dev/test et le service démarre sans : rien ici n'appelle
+# Stripe. Elles seront seedées en SSM au lot L6, à la mise en service réelle.
+STRIPE_TEST_SECRET_KEY = env("STRIPE_TEST_SECRET_KEY", default="")
+STRIPE_LIVE_SECRET_KEY = env("STRIPE_LIVE_SECRET_KEY", default="")
+# env.bool et NON env : la chaîne "False" est vraie en Python, et dj-stripe
+# basculerait en mode live sans le moindre avertissement.
+STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", default=False)
+# "id" est la valeur recommandée pour une installation neuve ; "djstripe_id" n'existe
+# que pour les installations antérieures à dj-stripe 2.4. Il n'y a pas de chemin de
+# migration entre les deux : le choix se fait maintenant ou jamais.
+DJSTRIPE_FOREIGN_KEY_TO_FIELD = "id"
+
+# Jours de grâce accordés après un échec de paiement avant de fermer l'accès (§6.6).
+# 0 désactive la grâce. Réglable en SSM sans redéploiement.
+BILLING_GRACE_DAYS = env.int("BILLING_GRACE_DAYS", default=7)
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
