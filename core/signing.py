@@ -22,14 +22,25 @@ SECRET_ROTATION_GRACE_SECONDS = 24 * 3600
 _REPLAY_PREFIX = "billing:sig:"
 
 
-def signed_string(body: bytes, timestamp: int) -> bytes:
-    """Ce qui est réellement signé : l'horodatage lie la signature à un instant."""
-    return f"{timestamp}.".encode() + (body or b"")
+def signed_string(method: str, path: str, body: bytes, timestamp: int) -> bytes:
+    """Ce qui est réellement signé.
+
+    L'horodatage lie la signature à un instant ; la **méthode** et le **chemin
+    complet** (requête comprise) la lient à une requête précise.
+
+    Sans eux, deux GET différents émis dans la même seconde produisaient une
+    signature identique — et l'anti-rejeu rejetait le second, alors qu'il était
+    parfaitement légitime. Pire : une signature valable pour `/plans/` valait
+    aussi pour `/entitlements/…`. Constaté le 2026-07-28.
+    """
+    return f"{timestamp}.{method.upper()}.{path}.".encode() + (body or b"")
 
 
-def sign_payload(secret: str, body: bytes, timestamp: int) -> str:
+def sign_payload(secret: str, method: str, path: str, body: bytes, timestamp: int) -> str:
     """La valeur de l'en-tête X-Foxugly-Signature, préfixe compris."""
-    digest = hmac.new(secret.encode(), signed_string(body, timestamp), hashlib.sha256).hexdigest()
+    digest = hmac.new(
+        secret.encode(), signed_string(method, path, body, timestamp), hashlib.sha256
+    ).hexdigest()
     return f"sha256={digest}"
 
 
@@ -43,7 +54,7 @@ def _secrets_valid_for(app) -> list:
     return [s for s in secrets_list if s]
 
 
-def verify_signature(app, body: bytes, timestamp, signature: str) -> bool:
+def verify_signature(app, method: str, path: str, body: bytes, timestamp, signature: str) -> bool:
     """Vrai si la signature est valide, dans la fenêtre, et jamais vue auparavant.
 
     L'anti-rejeu s'appuie sur le cache Django : il DOIT être partagé entre les
@@ -63,7 +74,7 @@ def verify_signature(app, body: bytes, timestamp, signature: str) -> bool:
         return False
 
     for secret in _secrets_valid_for(app):
-        if hmac.compare_digest(sign_payload(secret, body, ts), signature):
+        if hmac.compare_digest(sign_payload(secret, method, path, body, ts), signature):
             break
     else:
         return False

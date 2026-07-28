@@ -60,7 +60,11 @@ def test_the_outgoing_request_is_signed_with_the_app_secret(delivery, app):
 
     headers = post.call_args.kwargs["headers"]
     body = post.call_args.kwargs["data"]
-    expected = sign_payload(app.shared_secret, body, int(headers["X-Foxugly-Timestamp"]))
+    # La signature couvre desormais la methode et le chemin de l'endpoint cible.
+    expected = sign_payload(
+        app.shared_secret, "POST", "/api/billing/entitlement/", body,
+        int(headers["X-Foxugly-Timestamp"]),
+    )
 
     assert headers["X-Foxugly-App"] == "poker"
     assert headers["X-Foxugly-Signature"] == expected

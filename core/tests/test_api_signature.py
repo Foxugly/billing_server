@@ -62,7 +62,7 @@ def test_an_unknown_app_slug_is_refused(client, app):
         content_type="application/json",
         HTTP_X_FOXUGLY_APP="inconnue",
         HTTP_X_FOXUGLY_TIMESTAMP=str(ts),
-        HTTP_X_FOXUGLY_SIGNATURE=sign_payload(app.shared_secret, body, ts),
+        HTTP_X_FOXUGLY_SIGNATURE=sign_payload(app.shared_secret, "POST", URL, body, ts),
     )
 
     assert response.status_code in (401, 403)
@@ -76,7 +76,7 @@ def test_a_replayed_request_is_refused_the_second_time(client, app):
     headers = {
         "HTTP_X_FOXUGLY_APP": app.slug,
         "HTTP_X_FOXUGLY_TIMESTAMP": str(ts),
-        "HTTP_X_FOXUGLY_SIGNATURE": sign_payload(app.shared_secret, body, ts),
+        "HTTP_X_FOXUGLY_SIGNATURE": sign_payload(app.shared_secret, "POST", URL, body, ts),
     }
 
     first = client.post(URL, data=body, content_type="application/json", **headers)
@@ -90,7 +90,7 @@ def test_a_replayed_request_is_refused_the_second_time(client, app):
 def test_a_tampered_body_is_refused(client, app):
     """Signature valide pour un corps, appliquée à un autre."""
     ts = int(time.time())
-    signature = sign_payload(app.shared_secret, b'{"montant": 10}', ts)
+    signature = sign_payload(app.shared_secret, "POST", URL, b'{"montant": 10}', ts)
 
     response = client.post(
         URL,

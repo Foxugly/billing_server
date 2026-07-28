@@ -45,7 +45,11 @@ class HasValidAppSignature(BasePermission):
             logger.info("s2s_unknown_app", extra={"slug": slug})
             return False
 
-        if not verify_signature(app, request.body, timestamp, signature):
+        # get_full_path() inclut la query string : elle porte les parametres des
+        # GET (external_user_id...), qui doivent donc etre couverts par la signature.
+        if not verify_signature(
+            app, request.method, request._request.get_full_path(), request.body, timestamp, signature
+        ):
             logger.info("s2s_bad_signature", extra={"slug": slug})
             return False
 

@@ -29,7 +29,7 @@ def signed_post(client):
     def _post(url, payload, app, secret=None, timestamp=None):
         body = json.dumps(payload).encode()
         ts = timestamp if timestamp is not None else int(time.time())
-        signature = sign_payload(secret or app.shared_secret, body, ts)
+        signature = sign_payload(secret or app.shared_secret, "POST", url, body, ts)
         return client.post(
             url,
             data=body,
@@ -48,7 +48,7 @@ def signed_get(client):
 
     def _get(url, app, secret=None, timestamp=None):
         ts = timestamp if timestamp is not None else int(time.time())
-        signature = sign_payload(secret or app.shared_secret, b"", ts)
+        signature = sign_payload(secret or app.shared_secret, "GET", url, b"", ts)
         return client.get(
             url,
             HTTP_X_FOXUGLY_APP=app.slug,
