@@ -303,3 +303,43 @@ def test_the_catalogue_announces_the_trial_so_an_app_can_display_it(app, signed_
     assert [p["code"] for p in payload] == ["app"]
     assert payload[0]["trial_days"] == 30
     assert payload[0]["prices"]["monthly"] == {"id": "price_app_m", "amount": 200, "currency": "EUR"}
+
+
+@pytest.mark.django_db
+def test_the_history_says_what_was_subscribed_not_just_that_something_was(app, signed_get):
+    """Une ligne d'historique sans plan ni date ni quantité n'apprend rien : la
+    page consommatrice n'afficherait qu'une colonne de tirets."""
+    from djstripe.models import Customer, Price, Product, Subscription
+
+    produit = Product.objects.create(id="prod_h", name="Par application")
+    prix = Price.objects.create(
+        id="price_h_m", active=True, currency="eur", product=produit,
+        stripe_data={"id": "price_h_m", "unit_amount": 200, "currency": "eur"},
+    )
+    plan = Plan.objects.create(app=app, code="app", name="Par application", price_monthly=prix)
+    client_stripe = Customer.objects.create(id="cus_h", livemode=False)
+    AppCustomer.objects.create(app=app, external_user_id="42", customer=client_stripe)
+    # `status` est une propriete lue de stripe_data en dj-stripe 2.11, pas une
+    # colonne : la passer en kwarg leverait un AttributeError.
+    Subscription.objects.create(
+        id="sub_h", customer=client_stripe, livemode=False,
+        stripe_data={
+            "id": "sub_h",
+            "status": "active",
+            "start_date": 1_700_000_000,
+            "items": {"data": [{
+                "quantity": 3,
+                "price": {"id": "price_h_m"},
+                "current_period_end": 1_800_000_000,
+            }]},
+        },
+    )
+
+    ligne = signed_get(f"/api/v1/history/?external_user_id=42", app).json()["subscriptions"][0]
+
+    assert ligne["plan"] == plan.code
+    assert ligne["plan_name"] == "Par application"
+    assert ligne["interval"] == "monthly"
+    assert ligne["quantity"] == 3
+    assert ligne["started_at"] is not None
+    assert ligne["current_period_end"] is not None
