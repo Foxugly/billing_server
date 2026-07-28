@@ -11,31 +11,57 @@
 # écrivable par django. Il est installé root:root 0755 dans
 # /usr/local/sbin/billing-env-fetch.sh. Ce fichier-ci est la source versionnée,
 # jamais la cible d'exécution.
+#
+# DÉGRADATION GRACIEUSE : si quoi que ce soit échoue APRÈS un premier démarrage
+# réussi, on conserve l'environnement précédent et on sort en 0. Une valeur
+# aberrante posée en SSM ne doit pas suffire à arrêter un service qui tourne —
+# c'est arrivé le 2026-07-28 : une valeur corrompue a fait tomber billing alors
+# que le .env sur disque était parfaitement valide, parce que gunicorn dépend de
+# cette unit par `Requires=`. Au TOUT PREMIER démarrage (aucun .env), on échoue
+# au contraire franchement : démarrer sans configuration est pire que ne pas
+# démarrer du tout.
 # =============================================================================
 set -euo pipefail
 umask 077   # les fichiers temporaires contiennent brièvement des secrets déchiffrés.
 
-SSM_PREFIX="/billing/prod"
-AWS_REGION="eu-west-1"
-RUN_DIR="/run/billing"
+# Surchargeables pour pouvoir tester le script hors production.
+SSM_PREFIX="${BILLING_SSM_PREFIX:-/billing/prod}"
+AWS_REGION="${AWS_REGION:-eu-west-1}"
+RUN_DIR="${BILLING_RUN_DIR:-/run/billing}"
 ENV_FILE="$RUN_DIR/.env"
 TMP_FILE="$RUN_DIR/.env.tmp"
 RAW_FILE="$RUN_DIR/.ssm.json"
-OWNER="django:www-data"
+OWNER="${BILLING_ENV_OWNER:-django:www-data}"
 
 mkdir -p "$RUN_DIR"
 # 750 root:www-data — root l'écrit ; django (groupe www-data) peut traverser ;
 # le .env reste 640 pour que son contenu reste protégé (§3.5).
 chmod 750 "$RUN_DIR"
-chown root:www-data "$RUN_DIR"
+chown "${BILLING_RUN_DIR_OWNER:-root:www-data}" "$RUN_DIR" 2>/dev/null || true
 
+give_up() {
+    echo "ERREUR: $1" >&2
+    rm -f "$TMP_FILE" "$RAW_FILE"
+    if [ -s "$ENV_FILE" ]; then
+        echo "Conservation de l'environnement précédent ($ENV_FILE) — le service continue." >&2
+        exit 0
+    fi
+    echo "Aucun environnement précédent : abandon." >&2
+    exit 1
+}
+
+set +e
 aws ssm get-parameters-by-path \
     --path "$SSM_PREFIX" \
     --recursive \
     --with-decryption \
     --region "$AWS_REGION" \
     --output json > "$RAW_FILE"
+fetch_status=$?
+set -e
+[ $fetch_status -eq 0 ] || give_up "lecture SSM impossible (code $fetch_status)."
 
+set +e
 python3 - "$SSM_PREFIX" "$TMP_FILE" "$RAW_FILE" <<'PY'
 import json, sys
 
@@ -51,6 +77,8 @@ lines = []
 for p in params:
     key = p["Name"][len(prefix):].lstrip("/")
     value = p["Value"].strip("\r\n")
+    # Un saut de ligne interne casserait le format clé=valeur du fichier, et un
+    # retour chariot se glisserait dans la valeur lue par l'application.
     if "\n" in value or "\r" in value:
         sys.stderr.write(f"ERROR: value for {key} contains an internal newline; refusing.\n")
         sys.exit(1)
@@ -59,17 +87,16 @@ for p in params:
 with open(tmp_path, "w") as fh:
     fh.write("\n".join(sorted(lines)) + "\n")
 PY
+parse_status=$?
+set -e
+[ $parse_status -eq 0 ] || give_up "une valeur SSM est invalide (voir le message ci-dessus)."
 
 rm -f "$RAW_FILE"
 
-if [ ! -s "$TMP_FILE" ]; then
-    echo "ERROR: assembled env file is empty; keeping previous $ENV_FILE." >&2
-    rm -f "$TMP_FILE"
-    exit 1
-fi
+[ -s "$TMP_FILE" ] || give_up "l'environnement assemblé est vide."
 
 chmod 640 "$TMP_FILE"
-chown "$OWNER" "$TMP_FILE"
+chown "$OWNER" "$TMP_FILE" 2>/dev/null || true
 mv -f "$TMP_FILE" "$ENV_FILE"
 
 echo "Wrote $(wc -l < "$ENV_FILE") variables to $ENV_FILE."
