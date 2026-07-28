@@ -102,6 +102,7 @@ def handle_subscription_event(obj):
         stripe_customer_id=obj.get("customer") or "",
         quantity=quantity_of(obj),
     )
+    _link_customer_mirror(app, user_id, obj.get("customer") or "")
     delivery = EntitlementDelivery.objects.create(
         entitlement=entitlement, payload=entitlement.payload()
     )
@@ -111,6 +112,28 @@ def handle_subscription_event(obj):
 
     deliver_entitlement.delay(str(delivery.pk))
     return delivery
+
+
+def _link_customer_mirror(app, external_user_id, stripe_customer_id):
+    """Rattache l'AppCustomer a la fiche client du miroir dj-stripe.
+
+    Sans ca la FK reste vide et la console d'exploitation ne peut pas relier un
+    utilisateur d'une app a son client Stripe. Best-effort : si le miroir n'a pas
+    encore la fiche, on n'echoue pas -- un webhook ne doit pas retomber en erreur
+    pour un lien de confort, et le prochain evenement rattrapera.
+    """
+    if not stripe_customer_id:
+        return
+    from djstripe.models import Customer as DjstripeCustomer
+
+    from .models import AppCustomer
+
+    miroir = DjstripeCustomer.objects.filter(id=stripe_customer_id).first()
+    if miroir is None:
+        return
+    AppCustomer.objects.filter(
+        app=app, external_user_id=external_user_id, customer__isnull=True
+    ).update(customer=miroir)
 
 
 @djstripe_receiver(SUBSCRIPTION_EVENTS)

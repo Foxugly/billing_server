@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 
 from django.utils.timezone import get_current_timezone
+from djstripe.models import Customer as DjstripeCustomer
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -53,6 +54,20 @@ class PingView(SignedServiceView):
 
     def post(self, request):
         return Response({"app": request.billing_app.slug, "status": "ok"})
+
+
+def known_stripe_customer_id(app, external_user_id: str) -> str:
+    """L'identifiant Stripe (`cus_…`) déjà connu pour ce couple (app, utilisateur).
+
+    Il vit sur l'`Entitlement`, écrit par le webhook. `AppCustomer.customer` est
+    une FK vers le miroir dj-stripe dont la valeur brute est un entier interne,
+    pas un `cus_…` : la lire comme un identifiant Stripe est un piège, et c'était
+    la cause d'un checkout qui recréait un client à chaque paiement.
+    """
+    entitlement = Entitlement.objects.filter(
+        app=app, external_user_id=external_user_id
+    ).only("stripe_customer_id").first()
+    return (entitlement.stripe_customer_id or "") if entitlement else ""
 
 
 def serialize_price(price):
@@ -197,8 +212,24 @@ class CheckoutView(SignedServiceView):
                 "maximum": MAX_UNITS_PER_CHECKOUT,
             }
 
-        if customer.customer_id:
-            params["customer"] = customer.customer_id
+        customer_id = known_stripe_customer_id(app, external_user_id)
+        if customer_id:
+            # Un client deja abonne qui repasse par Checkout obtiendrait un
+            # SECOND abonnement Stripe : deux prelevements, et un droit qui
+            # oscille entre les deux au gre des webhooks. Le refus vit ici plutot
+            # que dans chaque front, parce que c'est la seule frontiere que
+            # toutes les apps traversent -- y compris celles qui n'existent pas
+            # encore. Changer de formule passe par le portail.
+            if active_subscription_for(stripe, customer_id) is not None:
+                return error(
+                    "already_subscribed",
+                    "Un abonnement est deja en cours pour ce compte.",
+                    status.HTTP_409_CONFLICT,
+                )
+            # Reutiliser le client existant : sinon Stripe en cree un nouveau a
+            # chaque paiement, les factures se dispersent entre plusieurs fiches
+            # et le portail n'en montre qu'une.
+            params["customer"] = customer_id
         elif email:
             params["customer_email"] = email
 
@@ -241,14 +272,16 @@ class HistoryView(SignedServiceView):
         app = request.billing_app
         external_user_id = str(request.query_params.get("external_user_id") or "")
 
-        customer = AppCustomer.objects.filter(
-            app=app, external_user_id=external_user_id
-        ).select_related("customer").first()
-
-        if customer is None or customer.customer is None:
+        # On passe par l'identifiant Stripe et non par `AppCustomer.customer` :
+        # cette FK n'a jamais ete renseignee, si bien que l'historique renvoyait
+        # systematiquement deux listes vides -- sans erreur, donc sans que rien
+        # ne le signale.
+        customer_id = known_stripe_customer_id(app, external_user_id)
+        miroir = DjstripeCustomer.objects.filter(id=customer_id).first() if customer_id else None
+        if miroir is None:
             return Response({"subscriptions": [], "invoices": []})
 
-        subscriptions = [self._serialize_subscription(app, sub) for sub in customer.customer.subscriptions.all()]
+        subscriptions = [self._serialize_subscription(app, sub) for sub in miroir.subscriptions.all()]
         invoices = [
             {
                 "id": inv.id,
@@ -260,7 +293,7 @@ class HistoryView(SignedServiceView):
                 "hosted_invoice_url": inv.hosted_invoice_url or "",
                 "invoice_pdf": inv.invoice_pdf or "",
             }
-            for inv in customer.customer.invoices.all()
+            for inv in miroir.invoices.all()
         ]
         return Response({"subscriptions": subscriptions, "invoices": invoices})
 

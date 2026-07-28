@@ -319,6 +319,9 @@ def test_the_history_says_what_was_subscribed_not_just_that_something_was(app, s
     plan = Plan.objects.create(app=app, code="app", name="Par application", price_monthly=prix)
     client_stripe = Customer.objects.create(id="cus_h", livemode=False)
     AppCustomer.objects.create(app=app, external_user_id="42", customer=client_stripe)
+    # C'est l'entitlement qui porte le `cus_…`, ecrit par le webhook : la FK
+    # AppCustomer.customer ne contient qu'un identifiant interne au miroir.
+    Entitlement.objects.create(app=app, external_user_id="42", stripe_customer_id="cus_h")
     # `status` est une propriete lue de stripe_data en dj-stripe 2.11, pas une
     # colonne : la passer en kwarg leverait un AttributeError.
     Subscription.objects.create(
@@ -343,3 +346,126 @@ def test_the_history_says_what_was_subscribed_not_just_that_something_was(app, s
     assert ligne["quantity"] == 3
     assert ligne["started_at"] is not None
     assert ligne["current_period_end"] is not None
+
+
+@pytest.mark.django_db
+def test_checkout_refuses_a_second_subscription_for_the_same_customer(
+    app, plan, signed_post, stripe_keys
+):
+    """Sans ce refus, un client déjà abonné qui repasse par Checkout obtiendrait
+    un SECOND abonnement Stripe : deux prélèvements, et un droit qui oscille
+    entre les deux au gré des webhooks."""
+    Entitlement.objects.create(app=app, external_user_id="42", stripe_customer_id="cus_deja")
+    price = MagicMock(id="price_123")
+    stripe = MagicMock()
+    stripe.Subscription.list.return_value = {"data": [{"id": "sub_1", "status": "active"}]}
+
+    with patch.object(Plan, "price_for", return_value=price), patch(
+        "core.api_views.stripe_client", return_value=stripe
+    ):
+        response = signed_post(
+            "/api/v1/checkout/",
+            {
+                "external_user_id": "42",
+                "plan": "team1",
+                "interval": "monthly",
+                "success_url": "https://poker.foxugly.com/ok",
+                "cancel_url": "https://poker.foxugly.com/ko",
+            },
+            app,
+        )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "already_subscribed"
+    stripe.checkout.Session.create.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_checkout_proceeds_when_the_previous_subscription_is_over(
+    app, plan, signed_post, stripe_keys
+):
+    """Un client qui a résilié doit pouvoir se réabonner : le refus porte sur un
+    abonnement vivant, pas sur le fait d'avoir déjà été client."""
+    Entitlement.objects.create(app=app, external_user_id="42", stripe_customer_id="cus_ancien")
+    price = MagicMock(id="price_123")
+    stripe = MagicMock()
+    stripe.Subscription.list.return_value = {"data": [{"id": "sub_1", "status": "canceled"}]}
+    stripe.checkout.Session.create.return_value = MagicMock(url="https://checkout.stripe.com/c/x")
+
+    with patch.object(Plan, "price_for", return_value=price), patch(
+        "core.api_views.stripe_client", return_value=stripe
+    ):
+        response = signed_post(
+            "/api/v1/checkout/",
+            {
+                "external_user_id": "42",
+                "plan": "team1",
+                "interval": "monthly",
+                "success_url": "https://poker.foxugly.com/ok",
+                "cancel_url": "https://poker.foxugly.com/ko",
+            },
+            app,
+        )
+
+    assert response.status_code == 200
+    stripe.checkout.Session.create.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_checkout_reuses_the_known_stripe_customer(app, plan, signed_post, stripe_keys):
+    """Sans ça Stripe crée une fiche client à chaque paiement : les factures se
+    dispersent entre plusieurs fiches et le portail n'en montre qu'une."""
+    Entitlement.objects.create(app=app, external_user_id="42", stripe_customer_id="cus_connu")
+    price = MagicMock(id="price_123")
+    stripe = MagicMock()
+    stripe.Subscription.list.return_value = {"data": []}
+    stripe.checkout.Session.create.return_value = MagicMock(url="https://checkout.stripe.com/c/x")
+
+    with patch.object(Plan, "price_for", return_value=price), patch(
+        "core.api_views.stripe_client", return_value=stripe
+    ):
+        signed_post(
+            "/api/v1/checkout/",
+            {
+                "external_user_id": "42",
+                "plan": "team1",
+                "interval": "monthly",
+                "success_url": "https://poker.foxugly.com/ok",
+                "cancel_url": "https://poker.foxugly.com/ko",
+            },
+            app,
+        )
+
+    params = stripe.checkout.Session.create.call_args.kwargs
+    assert params["customer"] == "cus_connu"
+    assert "customer_email" not in params
+
+
+@pytest.mark.django_db
+def test_a_first_checkout_identifies_the_customer_by_email(app, plan, signed_post, stripe_keys):
+    """Personne n'est encore connu de Stripe : c'est le seul cas où l'on peut
+    laisser Stripe créer la fiche."""
+    price = MagicMock(id="price_123")
+    stripe = MagicMock()
+    stripe.checkout.Session.create.return_value = MagicMock(url="https://checkout.stripe.com/c/x")
+
+    with patch.object(Plan, "price_for", return_value=price), patch(
+        "core.api_views.stripe_client", return_value=stripe
+    ):
+        signed_post(
+            "/api/v1/checkout/",
+            {
+                "external_user_id": "42",
+                "email": "nouveau@example.com",
+                "plan": "team1",
+                "interval": "monthly",
+                "success_url": "https://poker.foxugly.com/ok",
+                "cancel_url": "https://poker.foxugly.com/ko",
+            },
+            app,
+        )
+
+    params = stripe.checkout.Session.create.call_args.kwargs
+    assert params["customer_email"] == "nouveau@example.com"
+    assert "customer" not in params
+    stripe.Subscription.list.assert_not_called()
