@@ -1,0 +1,22 @@
+[Unit]
+Description=Foxugly Billing — gunicorn (WSGI)
+After=network.target billing-env-fetch.service postgresql.service
+Requires=billing-env-fetch.service
+
+[Service]
+User=django
+Group=www-data
+UMask=0027
+WorkingDirectory=/var/www/django_websites/billing_server
+EnvironmentFile=/run/billing/.env
+ExecStart=/var/www/django_websites/billing_server/.venv/bin/gunicorn \
+    --config /var/www/django_websites/billing_server/gunicorn.conf.py \
+    config.wsgi:application
+Restart=always
+RestartSec=5
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

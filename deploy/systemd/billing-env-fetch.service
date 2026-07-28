@@ -1,0 +1,24 @@
+[Unit]
+Description=Foxugly Billing — fetch environment from AWS SSM into /run/billing/.env
+After=network-online.target
+Wants=network-online.target
+Before=billing-gunicorn.service
+
+[Service]
+# oneshot + RemainAfterExit : tourne une fois au boot et reste "active".
+# Un déploiement de code ne redémarre PAS cette unit. Pour recharger les valeurs
+# SSM : `sudo systemctl restart billing-env-fetch && sudo systemctl restart billing-gunicorn`.
+Type=oneshot
+RemainAfterExit=yes
+# Force le rôle d'instance EC2 (foxugly-fleet-ec2) via IMDS en neutralisant les
+# clés statiques certbot-route53 de /root/.aws, qui sinon masquent le rôle (§3.5).
+Environment=AWS_SHARED_CREDENTIALS_FILE=/dev/null
+Environment=AWS_CONFIG_FILE=/dev/null
+Environment=AWS_REGION=eu-west-1
+# §3.10 : script exécuté en root, donc HORS de l'arbre django.
+ExecStart=/usr/local/sbin/billing-env-fetch.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
