@@ -36,6 +36,23 @@ les tests — uniquement des fixtures JSON et des mocks.
   `/api/v1/stripe/webhook/`, c'est remplacé par `path("stripe/", include("djstripe.urls"))`.
 - **Aucun objet dj-stripe n'est modifié par notre code.** Stripe reste la source de vérité pour
   l'argent ; nous ne faisons que lire son miroir.
+- **Le catalogue appartient à billing, jamais aux applications.** Décidé le 2026-07-28. Les apps
+  **lisent** leurs plans (`GET /api/v1/plans/?app=…`, lot L3) et n'écrivent jamais. Il n'y aura
+  donc **pas** d'API CRUD produits offerte aux apps ; le CRUD existe, mais pour l'opérateur, dans
+  l'admin puis la console (lot L5). Trois raisons :
+  1. **Un prix Stripe est immuable.** Changer un tarif ne se fait pas par un `UPDATE` : il faut
+     créer un **nouveau** `Price` et y repointer le `Plan`. Les abonnés existants restent sur
+     l'ancien prix tant qu'on ne les migre pas explicitement. Exposer ça derrière un CRUD
+     donnerait l'illusion d'une modification anodine.
+  2. **Un tarif engage l'entreprise** (TVA, factures déjà émises, abonnés en cours). Cette
+     décision ne doit pas pouvoir être prise depuis sept bases de code différentes.
+  3. **Deux écrivains sur le même catalogue = conflits garantis**, et l'audit de « qui a changé
+     le prix » devient impossible.
+- **Séparation des responsabilités sur le libellé :** billing détient la vérité commerciale
+  (`code`, prix, `quotas`, `active`), l'application détient la **présentation** (libellé traduit,
+  ordre d'affichage dans sa propre UI). Les `name`/`description` du `Plan` sont donc des libellés
+  **internes**, pour l'admin — pas ce que voit le client. C'est ce qui permet à chaque SPA de
+  traduire son catalogue dans ses 5 langues sans que billing gère de l'i18n.
 
 ---
 
