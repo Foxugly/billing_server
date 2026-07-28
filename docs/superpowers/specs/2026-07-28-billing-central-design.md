@@ -59,6 +59,10 @@ flotte reste maître de son propre gating fonctionnel, mais ne parle plus jamais
 | Compte Stripe | **Unique** (Foxugly SRL). Produits taggés `metadata.app = poker|tm|…`. |
 | TVA | **Stripe Tax activé** (calcul, collecte, OSS, factures conformes). |
 | Relation avec l'app billing de Poker | Le central devient le seul à parler à Stripe ; l'app Poker devient un consommateur qui garde son modèle local et son gating. |
+| Retour du Checkout | Pull synchrone au central sur `?billing=success`, pas de polling (§6.5). |
+| Échec de paiement | **7 jours de grâce** en `past_due` avant fermeture de l'accès (§6.6). |
+| Facturation directe (consulting) | Prévue au lot **L7** ; `AppCustomer.app` nullable posé **dès la première migration** (§5, §16). |
+| Coordonnées | Collecte email + nom + adresse + n° TVA. **Téléphone non collecté** (§17). |
 
 ---
 
@@ -124,14 +128,22 @@ Remplace les 6 variables `STRIPE_PRICE_*` + le dict `PLAN_QUOTAS` codés en dur 
 ### `AppCustomer` — le pont
 | Champ | Type |
 |---|---|
-| `app` | FK `App` |
-| `external_user_id` | `CharField` — l'id du user **dans l'app** |
+| `app` | FK `App`, **nullable** — `NULL` = client direct (voir plus bas) |
+| `external_user_id` | `CharField(blank)` — l'id du user **dans l'app** ; vide pour un client direct |
 | `email` | `EmailField` — dernier email connu, pour la recherche console |
 | `customer` | FK `djstripe.Customer` |
 
 `unique_together = (app, external_user_id)`. C'est ce modèle qui permet de se passer d'un
 compte utilisateur billing : l'app dit « mon user 42 », le central sait quel `Customer` Stripe
 c'est.
+
+**`app` est nullable dès la première migration.** Un `AppCustomer` avec `app=NULL` est un
+**client direct** : quelqu'un que Foxugly facture sans qu'il soit utilisateur d'un site de la
+flotte (prestation de consulting, cf. §16). Aucun `Entitlement` n'est calculé pour lui et
+aucune livraison n'est émise. La colonne est posée maintenant, même si la facturation directe
+n'arrive qu'au lot L7 : l'ajouter après coup imposerait une migration sur une table déjà
+peuplée en production. L'alternative d'un pseudo-tenant `App(slug="direct")` est rejetée —
+elle obligerait à filtrer « sauf direct » dans chaque requête d'entitlement.
 
 **Décision explicite — un seul `Customer` Stripe par email, partagé entre les apps.** Si
 `alice@x.be` s'abonne sur Poker puis sur TM, on crée deux `AppCustomer` (un par app) qui
@@ -199,8 +211,18 @@ Stripe ──▶ POST billing-api/api/v1/stripe/webhook/   (signature Stripe, dj
    → l'app met à jour son cache local
 ```
 
-Événements écoutés : `checkout.session.completed`, `customer.subscription.created|updated|deleted`,
-`invoice.paid`, `invoice.payment_failed`.
+Événements écoutés :
+
+| Événement | Effet |
+|---|---|
+| `checkout.session.completed` | création de l'abonnement, premier calcul d'entitlement |
+| `customer.subscription.created` / `.updated` / `.deleted` | recalcul (changement de plan, résiliation, fin de période) |
+| `invoice.paid` | renouvellement — `current_period_end` avance |
+| `invoice.payment_failed` | passage en `past_due` (voir la période de grâce, §6.6) |
+| `customer.updated` | **coordonnées de facturation modifiées depuis le portail** — pas d'impact sur l'entitlement, mais indispensable pour que la console ne fige pas l'adresse au jour de la souscription |
+| `customer.tax_id.created` / `.deleted` | numéro de TVA ajouté ou retiré — change le régime (autoliquidation) |
+
+Les trois derniers ne déclenchent pas de livraison : ils ne modifient que le miroir dj-stripe.
 
 Retries Celery : backoff exponentiel (1 min, 5 min, 15 min, 1 h, 6 h, 24 h) puis `failed`,
 visible et rejouable dans la console. Le central répond **200 à Stripe dès que l'événement est
@@ -219,7 +241,37 @@ recalcule chaque `Entitlement` à partir du miroir dj-stripe et repousse ceux qu
 dernier payload livré. Couvre le cas d'un push définitivement perdu ou d'une app restée
 longtemps hors ligne.
 
-### 6.5 Historique de facturation
+### 6.5 Retour du Checkout — la course, et la règle qui la tranche
+
+La redirection du navigateur vers `success_url` et le webhook Stripe partent **en parallèle** et
+rien ne garantit leur ordre. Le webhook arrive typiquement en moins d'une seconde, mais s'il est
+en retard, l'utilisateur revient sur une page qui lui annonce qu'il n'a pas d'abonnement — juste
+après avoir payé.
+
+**Règle figée :** quand le SPA revient avec `?billing=success`, l'application ne se contente
+**pas** de lire son cache local. Elle appelle en synchrone
+`GET /api/v1/entitlements/{app}/{external_user_id}/` au central, qui recalcule à la demande
+(en interrogeant Stripe si son propre miroir est en retard), renvoie l'état à jour, et
+déclenche la mise à jour du cache. Déterministe, sans polling ni temporisation arbitraire.
+
+Ce pull est **le seul** appel synchrone au central sur un chemin utilisateur. S'il échoue, l'app
+retombe sur son cache et affiche un message d'attente : le push finira d'arriver.
+
+### 6.6 Échec de paiement — période de grâce
+
+Un `invoice.payment_failed` fait passer l'abonnement en `past_due` chez Stripe, qui continue de
+relancer la carte pendant plusieurs jours. Couper l'accès au premier échec punit un client dont
+la carte a simplement expiré.
+
+**Règle :** `is_paid` reste `True` pendant **7 jours** après l'entrée en `past_due`
+(`grace_until = computed_at + 7 j`, porté dans le payload). Passé ce délai, ou dès que Stripe
+passe l'abonnement en `canceled` / `unpaid`, `is_paid` bascule à `False`. La relance client est
+faite par Stripe (emails de recouvrement natifs) — on ne réimplémente pas de séquence d'emails.
+
+Côté application, cela ne change rien : `PAID_STATUSES` reste `{active, trialing}` chez Poker,
+mais l'app ne décide plus — elle applique le `is_paid` reçu.
+
+### 6.7 Historique de facturation
 
 `GET /api/billing/history/` chez Poker devient un proxy vers
 `GET /api/v1/history/?app=&external_user_id=`, servi depuis le miroir dj-stripe. Gain par
@@ -260,6 +312,8 @@ Les routes de la console (`/api/admin/…`) sont authentifiées en JWT simplejwt
   "interval": "monthly",
   "quotas": {"teams": 1},
   "current_period_end": "2026-08-28T10:12:03Z",
+  "grace_until": null,
+  "stripe_customer_id": "cus_…",
   "source": "stripe"
 }
 ```
@@ -330,12 +384,19 @@ passe oublié public. Conforme à `STANDARD-frontend-layout.md` (topmenu canoniq
 `theme → language → user`, `ThemeService` + anti-FOUC, `app-language-switcher` 5 langues,
 `app-page-header` unique, `app-form-footer`, tokens SCSS, BEM, responsive, footer versionné).
 
+**Périmètre de la page Clients — précision qui évite un malentendu.** Le central ne connaît un
+individu qu'à partir du moment où **un tunnel de paiement a été ouvert pour lui** (création de
+l'`AppCustomer` à l'étape checkout). La liste contient donc les payants et les abandons de
+panier, mais **pas** les utilisateurs d'un site qui ne sont jamais allés sur la page tarifs.
+C'est une liste de clients au sens facturation, **pas un annuaire d'utilisateurs** — celui-ci
+reste dans le Django admin de chaque site, qui en est le responsable légitime.
+
 | Page | Contenu |
 |---|---|
 | Dashboard | MRR, abonnements actifs par app, nouveaux / résiliations sur 30 j, livraisons en échec |
 | Apps | CRUD, rotation du secret, bouton « tester la connectivité » (ping signé) |
 | Plans | CRUD, mapping vers les `Price` Stripe, quotas, ordre, visibilité |
-| Clients | Recherche par email ou app → détail : abonnements, factures, entitlement courant, action « offrir » (`source=manual`) |
+| Clients | Recherche par email ou app → détail : coordonnées de facturation, abonnements **toutes apps confondues**, factures, entitlement courant, historique des livraisons, action « offrir » (`source=manual`), lien profond vers le Django admin du site (`App.base_url` + `external_user_id`) |
 | Événements Stripe | Liste des `djstripe.Event` avec statut de traitement et rejeu |
 | Livraisons | File `EntitlementDelivery`, filtres, rejeu manuel |
 
@@ -371,7 +432,8 @@ Aucun appel réseau Stripe dans les tests : fixtures JSON + `unittest.mock` sur 
 | **L3** | API S2S (checkout, portal, plans, history, entitlements) + HMAC + Celery + retries + `sync_entitlements` | Checkout de bout en bout en **mode test** Stripe |
 | **L4** | Migration de Poker en consommateur (backend + SPA + tests), déployée **inerte** | Poker déployé, gating inchangé, tests verts |
 | **L5** | Console Angular | `billing.foxugly.com` en prod, staff-only |
-| **L6** | Mise en service réelle : produits/prix avec Stripe Tax, re-routage du webhook, secrets SSM des deux côtés, cutover Poker | Un abonnement live pris de bout en bout |
+| **L6** | Mise en service réelle : **numérotation de facture au niveau du compte**, produits/prix avec Stripe Tax, re-routage du webhook, secrets SSM des deux côtés, cutover Poker | Un abonnement live pris de bout en bout |
+| **L7** | Facturation directe (consulting) : page « Nouvelle facture », lignes, codes fiscaux, brouillon → finalisation → envoi, suivi des impayés | Une facture de prestation émise et payée |
 
 ---
 
@@ -421,3 +483,81 @@ indépendant de ce projet.
 - Paiements one-shot : le modèle les accepte (`mode=payment`, produit sans récurrence), mais
   aucun site n'en a l'usage aujourd'hui — implémenté quand un premier cas concret apparaît.
 - Metering / crédits : explicitement hors scope, nécessiterait un modèle de consommation.
+- Devis (Stripe Quotes) : adjacent à la facturation directe (§16), pas en v1.
+
+---
+
+## 16. Facturation directe — prestations de consulting (lot L7)
+
+Le service ne facture pas que des abonnements de la flotte : il doit pouvoir émettre une
+**facture ponctuelle de prestation** pour un client qui n'est utilisateur d'aucun site. Stripe
+Invoicing le fait nativement et dj-stripe mire déjà `Invoice` / `InvoiceItem` — l'essentiel du
+travail est dans la console.
+
+**Mécanique :** créer ou retrouver un `AppCustomer` avec `app=NULL` (§5) → `InvoiceItem`
+(description, quantité, prix unitaire, code fiscal) → `Invoice` en brouillon → finalisation →
+envoi. Le client reçoit un lien de paiement hébergé (carte ou virement SEPA) ; une facture réglée
+par virement direct peut être marquée payée hors Stripe. Stripe génère le PDF conforme et gère
+les relances d'impayés.
+
+**Aucun impact sur le cœur du projet :** pas d'entitlement, pas de livraison, pas de `Plan`.
+
+### Trois points à ne pas rater
+
+1. **Numérotation.** L'administration belge exige une séquence continue par émetteur. Stripe
+   numérote **par client** par défaut ; il faut basculer le compte sur une numérotation au
+   niveau du compte **avant la première facture émise** — le réglage n'est pas rétroactif. C'est
+   pour cette raison qu'il figure au lot **L6**, et pas au lot L7 : il conditionne aussi les
+   factures d'abonnement.
+2. **Régime de TVA du consulting.** Ce n'est pas celui du SaaS : B2B intra-UE → autoliquidation
+   si le numéro de TVA est valide (Stripe Tax le vérifie via VIES) ; B2B hors UE → hors champ ;
+   B2C → règle du lieu de prestation. Stripe Tax couvre les trois **à condition** de poser le bon
+   code fiscal sur chaque ligne. La console expose donc une petite liste de « catégories de
+   prestation » configurables, chacune mappée sur un code fiscal Stripe.
+3. **Le comptable.** À valider avec lui : accepte-t-il les PDF Stripe comme pièces
+   justificatives, ou veut-il un export structuré ? Stripe fournit les deux. Question à trancher
+   hors projet, avant L7.
+
+---
+
+## 17. Données personnelles, coordonnées et conservation
+
+### Ce qui est collecté
+
+La configuration Checkout retenue (`automatic_tax` + `customer_update: {address: "auto"}` +
+`tax_id_collection`) fait collecter par Stripe :
+
+| Donnée | Collectée | Destination |
+|---|---|---|
+| Email | toujours | `customer.email` |
+| Nom (ou raison sociale en B2B) | oui | `customer.name` |
+| Adresse de facturation complète | **oui, obligatoire** — Stripe Tax en a besoin | `customer.address` |
+| Numéro de TVA | optionnel, à l'initiative du client | `customer.tax_ids` |
+| Téléphone | **non — délibérément pas collecté** | — |
+| Carte bancaire | jamais chez nous | reste chez Stripe (exposée masquée : réseau + 4 derniers chiffres) |
+
+**Le téléphone est écarté par défaut** (`phone_number_collection` désactivé) : il n'est requis ni
+par la facturation, ni par la TVA, ni par le support. Le collecter ajouterait une donnée
+personnelle à protéger, exporter et effacer pour un usage inexistant.
+
+Tout cela est mis en miroir par dj-stripe : **la console lit les coordonnées depuis notre base**,
+sans appel à Stripe, et reste donc consultable si Stripe est injoignable. C'est `customer.updated`
+(§6.2) qui maintient ce miroir à jour quand un client modifie son adresse depuis le portail.
+
+### Où ces données ne vont pas
+
+**Aucune application de la flotte ne voit l'adresse de facturation de ses utilisateurs.** Poker
+ne détient que l'email et le pseudo ; adresse, numéro de TVA et historique de paiement restent
+dans le service billing et chez Stripe. Une compromission d'un site de la flotte n'expose aucune
+donnée de facturation — bénéfice direct de la centralisation, à faire figurer dans l'argumentaire
+sécurité.
+
+### Conformité
+
+- **Responsable de traitement** : Foxugly SRL. **Sous-traitant** : Stripe (DPA standard,
+  transferts encadrés). À refléter dans la politique de confidentialité de chaque site qui vend.
+- **Conservation** : factures et données qui les fondent sont des pièces comptables →
+  **7 ans** en Belgique. Une demande d'effacement RGPD ne les efface pas ; elle ne porte que sur
+  ce qui excède l'obligation légale.
+- **Droit d'accès / portabilité** : la page détail client de la console y répond directement,
+  Stripe fournissant les PDF de facture.
