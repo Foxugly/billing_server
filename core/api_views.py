@@ -14,9 +14,13 @@ from rest_framework.views import APIView
 from .models import AppCustomer, Entitlement, Plan
 from .permissions import HasValidAppSignature
 from .services import recompute_entitlement
-from .stripe_gateway import stripe_client, stripe_configured, url_is_allowed_for
+from .stripe_gateway import stripe_client, stripe_configured, trial_days_for, url_is_allowed_for
 
 logger = logging.getLogger("billing")
+
+# Borne haute de l'ajustement en ligne. Au-dela, un forfait illimite revient
+# moins cher : c'est a l'application de l'y orienter, pas au tunnel de paiement.
+MAX_UNITS_PER_CHECKOUT = 20
 
 
 def error(code, detail, http_status):
@@ -77,6 +81,7 @@ class PlansView(SignedServiceView):
                     "name": plan.name,
                     "description": plan.description,
                     "quotas": plan.quotas,
+                    "per_unit_quota_key": plan.per_unit_quota_key,
                     "prices": prices,
                 }
             )
@@ -117,6 +122,7 @@ class CheckoutView(SignedServiceView):
         email = data.get("email") or ""
         plan_code = data.get("plan")
         interval = data.get("interval")
+        quantity = data.get("quantity") or 1
         success_url = data.get("success_url") or ""
         cancel_url = data.get("cancel_url") or ""
 
@@ -143,12 +149,14 @@ class CheckoutView(SignedServiceView):
 
         params = {
             "mode": "subscription",
-            "line_items": [{"price": price.id, "quantity": 1}],
+            # La quantite fixe le quota pour un plan facture a l'unite.
+            "line_items": [{"price": price.id, "quantity": max(1, int(quantity))}],
             "client_reference_id": f"{app.slug}:{external_user_id}",
             "metadata": {
                 "app": app.slug,
                 "external_user_id": external_user_id,
                 "plan": plan.code,
+                "quantity": str(max(1, int(quantity))),
             },
             "success_url": success_url,
             "cancel_url": cancel_url,
@@ -158,6 +166,20 @@ class CheckoutView(SignedServiceView):
             "customer_update": {"address": "auto"},
             "tax_id_collection": {"enabled": True},
         }
+        essai = trial_days_for(stripe, plan, customer, quantity)
+        if essai:
+            params["subscription_data"] = {"trial_period_days": essai}
+        elif plan.per_unit_quota_key:
+            # Le client ajuste lui-meme le nombre d'exemplaires sur la page Stripe.
+            # JAMAIS pendant un essai : l'essai n'est accorde que pour une quantite
+            # de 1, et le laisser ajustable permettrait de le monter a 50 sur la
+            # page de paiement — l'offrande deviendrait cinquante fois plus chere.
+            params["line_items"][0]["adjustable_quantity"] = {
+                "enabled": True,
+                "minimum": 1,
+                "maximum": MAX_UNITS_PER_CHECKOUT,
+            }
+
         if customer.customer_id:
             params["customer"] = customer.customer_id
         elif email:

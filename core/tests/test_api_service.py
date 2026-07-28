@@ -172,7 +172,12 @@ def test_checkout_creates_the_session_with_tax_and_identifying_metadata(
     assert response.json()["url"].startswith("https://checkout.stripe.com/")
 
     params = fake_stripe.checkout.Session.create.call_args.kwargs
-    assert params["metadata"] == {"app": "poker", "external_user_id": "42", "plan": "team1"}
+    # La quantite est reportee dans les metadata : la reconciliation doit pouvoir
+    # la retrouver sans reinterroger Stripe.
+    assert params["metadata"] == {
+        "app": "poker", "external_user_id": "42", "plan": "team1", "quantity": "1",
+    }
+    assert params["line_items"][0]["quantity"] == 1
     assert params["client_reference_id"] == "poker:42"
     assert params["automatic_tax"] == {"enabled": True}
     assert params["tax_id_collection"] == {"enabled": True}
@@ -249,3 +254,28 @@ def test_history_is_empty_for_a_user_who_never_paid(app, signed_get):
 
     assert response.status_code == 200
     assert response.json() == {"subscriptions": [], "invoices": []}
+
+
+@pytest.mark.django_db
+def test_checkout_forwards_the_requested_quantity(app, plan, signed_post, stripe_keys):
+    """Sans elle, un client qui paie pour cinq applications n'en obtiendrait qu'une."""
+    price = MagicMock(id="price_123")
+    fake_stripe = MagicMock()
+    fake_stripe.checkout.Session.create.return_value = MagicMock(url="https://checkout.stripe.com/c/x")
+
+    with patch.object(Plan, "price_for", return_value=price), patch(
+        "core.api_views.stripe_client", return_value=fake_stripe
+    ):
+        signed_post(
+            "/api/v1/checkout/",
+            {
+                "external_user_id": "42", "plan": "team1", "interval": "monthly", "quantity": 5,
+                "success_url": "https://poker.foxugly.com/ok",
+                "cancel_url": "https://poker.foxugly.com/ko",
+            },
+            app,
+        )
+
+    params = fake_stripe.checkout.Session.create.call_args.kwargs
+    assert params["line_items"][0]["quantity"] == 5
+    assert params["metadata"]["quantity"] == "5"

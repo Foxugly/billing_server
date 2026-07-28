@@ -71,6 +71,14 @@ def price_id_of(subscription):
         return ""
 
 
+def quantity_of(subscription):
+    """La quantité souscrite. 1 par défaut — un abonnement forfaitaire n'en porte pas."""
+    try:
+        return int(subscription["items"]["data"][0].get("quantity") or 1)
+    except (KeyError, IndexError, TypeError, ValueError):
+        return 1
+
+
 def handle_subscription_event(obj):
     """Recalcule le droit décrit par un objet `subscription` Stripe.
 
@@ -92,6 +100,7 @@ def handle_subscription_event(obj):
         interval=interval,
         period_end=period_end_of(obj),
         stripe_customer_id=obj.get("customer") or "",
+        quantity=quantity_of(obj),
     )
     delivery = EntitlementDelivery.objects.create(
         entitlement=entitlement, payload=entitlement.payload()

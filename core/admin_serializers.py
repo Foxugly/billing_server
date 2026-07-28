@@ -35,7 +35,7 @@ class PlanSerializer(serializers.ModelSerializer):
         fields = (
             "id", "app", "app_slug", "code", "name", "description",
             "price_monthly", "price_yearly", "price_monthly_amount", "price_yearly_amount",
-            "quotas", "sort_order", "public", "active",
+            "quotas", "per_unit_quota_key", "trial_days", "sort_order", "public", "active",
         )
 
     def get_price_monthly_amount(self, plan):
