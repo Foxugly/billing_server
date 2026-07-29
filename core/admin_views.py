@@ -26,6 +26,7 @@ from .admin_serializers import (
     InvoiceDraftSerializer,
     InvoiceSerializer,
     PlanSerializer,
+    PriceSerializer,
 )
 from .invoicing import (
     InvoicingError,
@@ -98,6 +99,26 @@ class PlanViewSet(StaffViewSet):
         queryset = super().get_queryset()
         app_slug = self.request.query_params.get("app")
         return queryset.filter(app__slug=app_slug) if app_slug else queryset
+
+
+class PriceViewSet(viewsets.ViewSet):
+    """Les prix Stripe mirés, pour le sélecteur de la page Plans.
+
+    En lecture seule : un prix ne se crée ni ne se modifie ici. Stripe les rend
+    immuables sur les champs qui comptent (montant, `tax_behavior`) — un
+    changement de tarif se fait en créant un nouveau prix côté Stripe, puis en
+    recâblant le plan dessus.
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+
+    def list(self, request):
+        from djstripe.models import Price
+
+        # Les prix archivés sont exclus : Stripe refuse de vendre dessus, les
+        # proposer donnerait un plan invendable.
+        prix = Price.objects.filter(active=True).select_related("product").order_by("id")
+        return Response(PriceSerializer(list(prix), many=True).data)
 
 
 class CustomerViewSet(StaffViewSet):

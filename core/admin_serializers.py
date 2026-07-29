@@ -71,6 +71,36 @@ class AppCustomerSerializer(serializers.ModelSerializer):
         return customer.app.slug if customer.app else None
 
 
+class PriceSerializer(serializers.Serializer):
+    """Un prix Stripe miré, tel que le sélecteur de la page Plans l'affiche.
+
+    En dj-stripe 2.11, `unit_amount` est une propriété lue de `stripe_data` et
+    `recurring` n'existe pas en base : les deux se lisent donc à la main.
+    """
+
+    id = serializers.CharField(read_only=True)
+    unit_amount = serializers.IntegerField(read_only=True)
+    currency = serializers.SerializerMethodField()
+    interval = serializers.SerializerMethodField()
+    nickname = serializers.SerializerMethodField()
+    product_name = serializers.SerializerMethodField()
+
+    def get_currency(self, price):
+        return (price.currency or "").upper()
+
+    def get_interval(self, price):
+        """Vide pour un prix ponctuel — inventer « month » ferait croire à un
+        abonnement mensuel là où il n'y en a pas."""
+        recurrence = (price.stripe_data or {}).get("recurring") or {}
+        return recurrence.get("interval", "")
+
+    def get_nickname(self, price):
+        return (price.stripe_data or {}).get("nickname") or ""
+
+    def get_product_name(self, price):
+        return price.product.name if price.product else ""
+
+
 class InvoiceSerializer(serializers.Serializer):
     """Une facture telle que la console l'affiche.
 
