@@ -10,22 +10,53 @@ ces réglages engagent fiscalement Foxugly SRL) · **[C]** = code ou ops, exécu
 
 ---
 
-## Ce qui est déjà en place (vérifié le 2026-07-29)
+> ⚠️ **Ce document a d'abord été écrit sur une hypothèse fausse.** Sa première version présentait
+> le fiscal, l'audit des prix et le cutover de Poker comme restant à faire : ils étaient **déjà
+> exécutés**. Corrigé le 2026-07-29 après interrogation du compte live. La leçon vaut d'être
+> gardée : un runbook rédigé depuis la spec plutôt que depuis l'état réel fait refaire des gestes
+> déjà faits — et sur un compte live, refaire est parfois destructeur.
 
-Une partie du lot est faite. Inutile de la refaire :
+## Ce qui est déjà en place (interrogé sur le compte live le 2026-07-29)
 
-| Élément | État |
+**L'essentiel du lot est fait.** Ne rien refaire de ce tableau :
+
+| Élément | État constaté |
 |---|---|
 | Service en prod | `billing-gunicorn` / `-celery` / `-celery-beat` actifs, `/health/` 200 |
 | Mode Stripe | **live** — `STRIPE_LIVE_MODE=true`, clé live en SSM `/billing/prod` |
-| Endpoint webhook | déclaré, `livemode`, `enabled` — mais **0 `Event` traité à ce jour** |
+| **Stripe Tax** | ✅ **`status: active`**, défauts `inferred_by_currency` / `txcd_10000000` |
+| **Enregistrement TVA** | ✅ une inscription **BE**, `active`, `country_options.be.type = oss_union` |
+| **TVA calculée** | ✅ vérifié par trois calculs à blanc : BE → **21 %**, FR → **20 %** (OSS), US → **0 %** `not_collecting`. L'inscription OSS couvre donc le domestique **et** le cross-border UE |
+| **`tax_behavior` des prix** | ✅ les **8** prix actifs sont `exclusive` — **rien à recréer** |
+| **Cutover Poker** | ✅ fait — `/poker/prod` porte `BILLING_BASE_URL` + `BILLING_APP_SECRET`, et **plus aucun** `STRIPE_*` |
+| **Webhook** | ✅ un **seul** endpoint, `enabled`, vers `billing-api` — l'ancien vers Poker a disparu |
 | Objets Stripe mirés | 6 `Product`, 8 `Price` |
-| Apps seedées | `poker` et `pushit`, actives, chemin de livraison canonique |
-| Plans seedés | poker `team1`/`team5`, pushit `app`/`unlimited` — mensuel **et** annuel câblés |
-| Consommateurs | Poker et PushIT déployés, signature HMAC opérationnelle (une livraison acquittée en 200) |
+| Apps / plans seedés | `poker` (`team1`/`team5`) et `pushit` (`app`/`unlimited`), mensuel **et** annuel câblés |
+| Live réel | **0 client, 0 abonnement, 0 facture, 0 `Event` traité** |
 
-Autrement dit : la plomberie fonctionne. Ce qui reste, c'est le **fiscal**, la **numérotation**,
-et le **basculement de Poker** de son Stripe historique vers le central.
+Autrement dit : la plomberie et le fiscal fonctionnent. Il reste **deux réglages de dashboard**, et
+la chaîne complète n'a encore jamais tourné avec un vrai paiement.
+
+---
+
+## Les deux seuls gestes qui restent **[R]**
+
+Les deux sont dans le dashboard, les deux sont à faire **avant la première facture émise**.
+
+### 1. La numérotation au niveau du compte — non rétroactive
+
+Détaillée à l'étape 0 ci-dessous. **Non vérifiable par l'API** : ni `Account.retrieve()` ni aucun
+autre point d'entrée n'expose le mode de numérotation. Il faut le lire dans le dashboard.
+
+### 2. Le numéro de TVA de l'émetteur sur les factures
+
+`Account.settings.invoices.default_account_tax_ids` vaut **`null`**, et `TaxId.list()` du compte ne
+renvoie **aucun** numéro. En l'état, une facture émise ne porterait pas le numéro de TVA de Foxugly
+SRL — or une facture belge doit le porter.
+
+**Nuance :** le modèle de facture du dashboard peut le porter autrement (champ personnalisé, pied
+de page), et l'API ne le montrerait pas. C'est donc un signal fort, **pas une preuve**. À confirmer
+dans *Settings → Billing → Invoices → Invoice template* avant d'émettre.
 
 ---
 
@@ -49,24 +80,34 @@ est propre à chaque mode, et on veut le même comportement des deux côtés.
 
 ---
 
-## Étape 1 — TVA **[R]**
+## Étape 1 — TVA **[R]** — ✅ FAITE
 
-1. Activer **Stripe Tax**.
-2. Déclarer les **enregistrements TVA** : Belgique, et **OSS** pour les ventes B2C dans le reste
-   de l'UE.
-3. Vérifier que l'adresse de l'entreprise et son numéro de TVA sont renseignés — Stripe Tax s'en
-   sert pour déterminer le régime applicable.
+Constaté le 2026-07-29 sur le compte live : Stripe Tax `active`, une inscription **BE** `active` de
+type **`oss_union`**. Vérifié par le calcul plutôt que par la lecture du réglage — trois calculs à
+blanc (`stripe.tax.Calculation.create`) sur 20,00 € HT :
 
-Sans ces enregistrements, Stripe Tax calcule 0 % partout et le service émettra des factures sans
-TVA, ce qui est bien pire qu'une erreur visible.
+| Adresse de l'acheteur | TVA calculée | Motif |
+|---|---|---|
+| BE, Bruxelles | **4,20 €** (21 %) | `standard_rated` |
+| FR, Paris | **4,00 €** (20 %) | `standard_rated` |
+| US, Austin | **0,00 €** | `not_collecting` |
+
+**Enseignement à garder :** l'inscription OSS déposée dans le pays d'établissement couvre à la fois
+le domestique et le cross-border UE — il n'y a pas besoin d'une seconde inscription « standard »
+belge. Ça ne se déduit pas de la documentation, ça se constate par un calcul.
+
+Le calcul à blanc est le bon outil de vérification : il ne crée ni client, ni facture, ni paiement.
 
 ---
 
-## Étape 2 — audit des prix existants **[C]**, décision **[R]**
+## Étape 2 — audit des prix existants **[C]** — ✅ FAITE
 
-Les 4 prix live du catalogue Poker ont été créés avant Stripe Tax. Il faut vérifier leur
-`tax_behavior` : `inclusive` (TVA comprise) ou `exclusive` (TVA en sus). S'il vaut `unspecified`,
-Stripe Tax ne peut pas calculer — et **le champ est immuable** sur un prix existant.
+Constaté le 2026-07-29 : les **8** prix actifs sont tous en `tax_behavior = exclusive`. **Rien à
+recréer.** La procédure ci-dessous n'a plus d'objet ; elle est conservée parce qu'elle resservira
+au prochain prix créé à la main.
+
+`tax_behavior` vaut `inclusive` (TVA comprise) ou `exclusive` (TVA en sus). S'il vaut
+`unspecified`, Stripe Tax ne peut pas calculer — et **le champ est immuable** sur un prix existant.
 
 ⚠️ **L'audit ne peut pas se faire depuis dj-stripe** : son modèle `Price` n'expose ni `recurring`
 ni `tax_behavior` (constaté le 2026-07-28 — une `FieldError` remontée dans Sentry). Passer par le
@@ -116,35 +157,34 @@ Tant que ces six points ne sont pas verts, ne pas passer à l'étape 4.
 
 ---
 
-## Étape 4 — cutover de Poker **[C]** + SSM **[R]**
+## Étape 4 — cutover de Poker — ✅ FAITE
 
-L'ordre compte : un webhook pointe déjà sur Poker, et Poker détient encore ses propres clés Stripe.
+Constaté le 2026-07-29 : `/poker/prod` porte `BILLING_BASE_URL` et `BILLING_APP_SECRET`, et **plus
+aucun** `STRIPE_*`. Un **seul** endpoint webhook existe côté Stripe, `enabled`, vers `billing-api` :
+l'ancien, qui pointait sur Poker, a été retiré. Poker est donc consommateur du central, pour de bon.
 
-1. **[C]** Vérifier que Poker tourne bien en consommateur inerte : le code est déployé, mais sans
-   `BILLING_BASE_URL` ni `BILLING_APP_SECRET`, il reste sur son chemin historique.
-2. **[R]** Enregistrer le **nouvel** endpoint webhook vers `billing-api` — déjà fait — et **garder
-   l'ancien actif** le temps de la bascule.
-3. **[R]** Dans SSM `/poker/prod` : poser `BILLING_BASE_URL` et `BILLING_APP_SECRET` (le secret se
-   lit **une seule fois**, au moment de la rotation depuis la console), puis **retirer** les
-   `STRIPE_*`.
-4. **[C]** Redémarrer `poker-asgi`, vérifier `/health/` et un achat de bout en bout.
-5. **[C]** `sync_entitlements --app poker --push-diff` pour aligner l'état.
-6. **[R]** Désactiver l'ancien endpoint webhook.
-
-**Rollback** : remettre les `STRIPE_*` dans `/poker/prod`, retirer `BILLING_BASE_URL`, redémarrer.
-Poker reprend son chemin historique. C'est pour garder ce retour possible que l'ancien endpoint
-reste actif jusqu'au bout.
+**Rollback, s'il fallait revenir** : remettre les `STRIPE_*` dans `/poker/prod`, retirer
+`BILLING_BASE_URL`, redémarrer `poker-asgi` — et rétablir l'endpoint webhook vers Poker, qui n'existe
+plus. Le retour est donc plus coûteux qu'à l'origine ; il n'y a de toute façon aucun abonné à
+protéger.
 
 ---
 
 ## Le vrai risque, et où il n'est pas
 
-Il n'y a **aucun abonné à casser** : 0 abonnement existant, sur Poker comme ailleurs. Le risque
-n'est pas commercial, il est fiscal et silencieux :
+Il n'y a **aucun abonné à casser** : 0 client, 0 abonnement, 0 facture. Le risque n'est pas
+commercial, il est fiscal et silencieux. Sur les trois pièges initialement listés, **deux sont
+désormais écartés** et c'est vérifié :
 
-- une TVA à 0 % parce que les enregistrements manquent ;
-- une numérotation par client qu'on ne peut plus corriger après la première facture ;
-- un `tax_behavior` à `unspecified` qui fait échouer le calcul sans que personne ne regarde.
+- ~~une TVA à 0 % parce que les enregistrements manquent~~ → écarté, calculs à blanc à l'appui ;
+- ~~un `tax_behavior` à `unspecified`~~ → écarté, les 8 prix sont `exclusive` ;
+- **une numérotation par client qu'on ne peut plus corriger après la première facture** → **reste
+  ouvert**, et non vérifiable par l'API ;
+- **une facture sans le numéro de TVA de l'émetteur** → **s'ajoute à la liste** :
+  `default_account_tax_ids` est `null` et le compte n'a aucun `TaxId` enregistré.
+
+Les deux points ouverts ont le même profil : invisibles jusqu'à la clôture, et impossibles à
+rattraper sur les factures déjà émises.
 
 Aucun de ces trois ne déclenche d'alerte. Ils se constatent à la clôture, un an plus tard.
 
