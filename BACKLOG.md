@@ -70,9 +70,9 @@ migration `0005` appliquée, aucune erreur dans les journaux, 184 tests verts, 1
   la fuite impossible aujourd'hui, mais des hôtes non routables (`.invalid`, RFC 2606)
   supprimeraient la classe entière de risque. Diff mécanique mais large, et quelques tests
   d'anti-redirection ouverte dépendent du domaine : à faire d'un bloc, pas en passant.
-- [ ] **P3 — Tests de la console très minces.** 2 fichiers `.spec.ts` (`auth.service`,
-  `entitlements-list`) pour 7 features. La CI est verte, mais elle ne prouve pas grand-chose au
-  delà de la compilation.
+- [ ] **P3 — Tests de la console encore minces.** 3 fichiers `.spec.ts` (`auth.service`,
+  `entitlements-list`, `invoices-list`) pour 8 features. Mieux qu'avant — la conversion
+  euros→centimes de la facturation est couverte — mais les pages de lecture ne le sont pas.
 
 ---
 
@@ -82,12 +82,15 @@ Découpage complet : `docs/superpowers/specs/2026-07-28-billing-central-design.m
 
 - **L4 — Poker consommateur** : fait, et au-delà du plan (PushIT l'est aussi ; les deux apps sont
   seedées, 4 plans actifs, une livraison poussée et acquittée).
-- **L6 — mise en service réelle** : pas fait. Numérotation de facture au niveau du compte,
-  produits/prix avec Stripe Tax, re-routage du webhook, cutover. L'endpoint webhook est déjà
-  `livemode` et `enabled`, 8 `Price` / 6 `Product` sont mirés, mais **0 `Event`** traité.
-  ⚠️ L'audit `tax_behavior` de l'étape 1 ne peut pas se faire depuis dj-stripe : son modèle
-  `Price` n'expose ni `recurring` ni `tax_behavior` — passer par le SDK Stripe directement.
-  Un premier essai d'archivage de prix a d'ailleurs buté sur « this price cannot be archived
-  because it is the default price of its product » : il faut changer le prix par défaut du
-  produit avant d'archiver l'ancien.
-- **L7 — facturation directe (consulting)** : pas commencé.
+- **L6 — mise en service réelle** : **runbook écrit**
+  (`docs/superpowers/plans/2026-07-29-billing-l6-mise-en-service.md`), exécution en attente. Ce lot
+  n'est presque pas du code : plusieurs étapes sont des gestes irréversibles dans le dashboard
+  Stripe d'un compte live, et elles engagent fiscalement la société — elles reviennent à Renaud,
+  pas à l'agent. **Ce qui bloque :** l'étape 0 (numérotation au niveau du compte, non rétroactive,
+  à faire avant la première facture) et les clés du mode test pour la répétition.
+- **L7 — facturation directe (consulting)** : **fait côté code** (2026-07-29), en attente de la
+  répétition en mode test. `core/invoicing.py` + API console + page « Factures » : client direct,
+  lignes, brouillon → finalisation → envoi, « marquer payée » hors Stripe, export CSV, codes
+  fiscaux lus du catalogue Stripe. Périmètre volontairement réduit pour quelques factures par an :
+  **pas** de suivi d'impayés (Stripe relance nativement), **pas** de CRUD de catégories de
+  prestation.

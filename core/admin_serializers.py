@@ -71,6 +71,62 @@ class AppCustomerSerializer(serializers.ModelSerializer):
         return customer.app.slug if customer.app else None
 
 
+class InvoiceSerializer(serializers.Serializer):
+    """Une facture telle que la console l'affiche.
+
+    Lue du miroir dj-stripe et non de l'API Stripe : la console reste consultable
+    si Stripe est injoignable (§17). En dj-stripe 2.11 la plupart de ces champs
+    sont des proprietes calculees depuis `stripe_data`, pas des colonnes.
+    """
+
+    id = serializers.CharField(read_only=True)
+    number = serializers.CharField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    currency = serializers.CharField(read_only=True)
+    subtotal = serializers.IntegerField(read_only=True)
+    tax = serializers.IntegerField(read_only=True)
+    total = serializers.IntegerField(read_only=True)
+    amount_due = serializers.IntegerField(read_only=True)
+    hosted_invoice_url = serializers.CharField(read_only=True)
+    invoice_pdf = serializers.CharField(read_only=True)
+    created = serializers.DateTimeField(read_only=True)
+    customer_email = serializers.SerializerMethodField()
+    origin = serializers.SerializerMethodField()
+
+    def get_customer_email(self, invoice):
+        pont = AppCustomer.objects.filter(customer=invoice.customer).first()
+        return pont.email if pont else ""
+
+    def get_origin(self, invoice):
+        """« direct » (prestation) ou le slug de l'app qui a vendu l'abonnement."""
+        if (invoice.metadata or {}).get("origin") == "direct":
+            return "direct"
+        pont = AppCustomer.objects.filter(customer=invoice.customer).first()
+        return pont.app.slug if pont and pont.app else "direct"
+
+
+class InvoiceDraftSerializer(serializers.Serializer):
+    """Ce qu'un formulaire de nouvelle facture envoie."""
+
+    class _Customer(serializers.Serializer):
+        email = serializers.EmailField()
+        name = serializers.CharField(required=False, allow_blank=True)
+        address = serializers.DictField(required=False)
+
+    class _Line(serializers.Serializer):
+        description = serializers.CharField()
+        quantity = serializers.IntegerField(min_value=1, default=1)
+        # En centimes, comme partout chez Stripe : un float sur un montant
+        # facture finit toujours par manquer un centime.
+        unit_amount = serializers.IntegerField(min_value=1)
+        tax_code = serializers.CharField(required=False, allow_blank=True)
+
+    customer = _Customer()
+    lines = serializers.ListField(child=_Line(), allow_empty=False)
+    days_until_due = serializers.IntegerField(min_value=0, default=30)
+    description = serializers.CharField(required=False, allow_blank=True)
+
+
 class EntitlementDeliverySerializer(serializers.ModelSerializer):
     app_slug = serializers.CharField(source="entitlement.app.slug", read_only=True)
     external_user_id = serializers.CharField(source="entitlement.external_user_id", read_only=True)
