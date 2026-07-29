@@ -1,14 +1,17 @@
 # BACKLOG — billing_server (+ billing_frontend)
 
-Issu d'une revue de session (2026-07-29), après les lots L1→L3 et L5a. Sévérités :
-**P1** important · **P2/P3** à nettoyer. Le travail coché est commité/poussé sur
+Issu d'une revue de session (2026-07-29), après les lots L1→L3, L5a, la console (L5) et L7.
+Sévérités : **P1** important · **P2/P3** à nettoyer. Le travail coché est commité/poussé sur
 `Foxugly/billing_server` (`main`, CI verte).
 
-État vérifié le 2026-07-29, après les PR #15/#16/#17 déployées : units `billing-gunicorn` /
+État vérifié le 2026-07-29, après les PR #15 à #20 déployées : units `billing-gunicorn` /
 `-celery` / `-celery-beat` / `-env-fetch` / `-frontend-runtime-fetch` actives, `/health/` 200,
 console 200, `/api/v1/admin/apps/` 401 et `/api/admin/apps/` 404 (l'alias est bien retiré),
-migration `0005` appliquée, aucune erreur dans les journaux, 184 tests verts, 1 livraison
-`delivered` / 0 `failed`.
+migration `0005` appliquée, aucune erreur dans les journaux, **211 tests backend** et **24 tests
+console** verts, 1 livraison `delivered` / 0 `failed`.
+
+**Aucun compte ni client en production** — 0 `AppCustomer`, 0 `Event` Stripe traité. C'est ce qui
+a permis de trancher plusieurs arbitrages de cette revue sans précaution particulière.
 
 ---
 
@@ -36,25 +39,23 @@ migration `0005` appliquée, aucune erreur dans les journaux, 184 tests verts, 1
 
 ## À faire
 
-- [ ] **P2 — La console ne couvre pas encore tout le §10 du design.** Livrées : dashboard, apps,
-  clients, droits, livraisons. Manquent :
-  - **Plans** (CRUD, mapping vers les `Price` Stripe, quotas, ordre, visibilité) — le backend est
-    déjà là (`PlanViewSet`, `GET/POST /api/v1/admin/plans/`), il ne manque que la page Angular.
-  - **Événements Stripe** (liste des `djstripe.Event` avec statut de traitement et rejeu) — ni
-    page ni viewset : c'est un lot backend + frontend.
+- [ ] **P2 — Il manque la page « Événements Stripe » du §10.** Liste des `djstripe.Event` avec
+  statut de traitement et rejeu : ni page ni viewset, c'est un lot backend + frontend. Tout le
+  reste du §10 est livré — dashboard, apps, plans, clients, droits, livraisons, factures.
 - [x] **P3 — Middleware d'alias `/api/` → `/api/v1/` retiré (2026-07-29).** Une seule réécriture
   journalisée depuis sa mise en place (le 2026-07-28, à la vérification post-déploiement), et les
   deux consommateurs signent déjà `/api/v1/` (`billing/client.py:91` des deux côtés) : le critère
   de suppression de §3.18 était rempli. Un test pin désormais le 404 sur l'ancien préfixe.
-- [ ] **P3 — L'alias reste en place ailleurs dans la flotte, et c'est justifié pour l'instant.**
-  Relevé le 2026-07-29 sur les journaux de la box :
-  - **quizonline** — 595 réécritures en 3 jours, ~68/h de façon régulière jusqu'au 2026-07-29
-    08:20 UTC, puis plus rien. Un appelant automatique qui n'apparaît **pas** dans
-    `quizonline-access.log` : il ne passe donc pas par nginx. À identifier avant de retirer
-    quoi que ce soit.
-  - **poker** — 5 réécritures en 7 jours, dont 4 étaient la suite de tests de ce dépôt (corrigé,
-    voir plus haut) et une un appel navigateur du 2026-07-28 (`/api/teams/`), vraisemblablement
-    un bundle en cache. À re-vérifier après une fenêtre calme.
+- [x] **P3 — Alias retiré du reste de la flotte aussi (2026-07-29).** `Poker_server` PR #25 (201
+  tests) et `Foxugly/QuizOnline` PR #119 (1194 tests, CI complète). Vérifié en production :
+  l'ancien préfixe répond 404, le canonique répond normalement, `/health/` 200 des deux côtés.
+  Les appelants restants étaient identifiés et bénins — sur quizonline, les 595 réécritures en
+  3 jours (~68/h) venaient d'**un seul onglet de navigateur** resté ouvert sur `/lesson/1`, qui
+  appelait `GET /api/unread-counts/` toutes les 60 s et s'est tu à sa fermeture, le 2026-07-29 à
+  08:20:40 UTC. Décision de ne pas attendre de fenêtre calme : aucun compte, aucun client en
+  production, donc aucun bundle en cache à ménager.
+  *Au passage : le trafic du SPA quizonline atterrit dans le `access.log` par défaut de nginx et
+  non dans `quizonline-access.log` — c'est ce qui a rendu cette recherche pénible.*
 - [x] **P3 — Hygiène Sentry (2026-07-29).** Les 7 issues `billing-backend` et l'unique
   `billing-frontend` passées en résolu, chacune avec le motif en commentaire : le
   `celerybeat-schedule` permission denied (571 events, corrigé par la PR #5 et muet depuis), le
@@ -70,9 +71,15 @@ migration `0005` appliquée, aucune erreur dans les journaux, 184 tests verts, 1
   la fuite impossible aujourd'hui, mais des hôtes non routables (`.invalid`, RFC 2606)
   supprimeraient la classe entière de risque. Diff mécanique mais large, et quelques tests
   d'anti-redirection ouverte dépendent du domaine : à faire d'un bloc, pas en passant.
-- [ ] **P3 — Tests de la console encore minces.** 3 fichiers `.spec.ts` (`auth.service`,
-  `entitlements-list`, `invoices-list`) pour 8 features. Mieux qu'avant — la conversion
-  euros→centimes de la facturation est couverte — mais les pages de lecture ne le sont pas.
+- [ ] **P3 — Tests de la console encore minces.** 4 fichiers `.spec.ts` (`auth.service`,
+  `entitlements-list`, `invoices-list`, `plans-list`) pour 9 features. Ce qui compte est couvert —
+  la conversion euros→centimes, le vidage des quotas d'un plan à l'unité — mais les pages de
+  lecture ne le sont pas.
+- [x] **P2 — Les libellés communs manquaient dans les catalogues (2026-07-29).** `common.status`,
+  `common.actions`, `common.active`, `common.inactive`, `common.save`, `common.close` et
+  `common.search` n'existaient nulle part : Transloco rendant la clé quand la traduction manque,
+  la console affichait littéralement « common.status » en en-tête de colonne, **sur toutes les
+  pages, depuis le début**. Les sept ajoutés dans les cinq langues (`billing_frontend` PR #4).
 
 ---
 
