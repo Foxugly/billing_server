@@ -71,6 +71,46 @@ class AppCustomerSerializer(serializers.ModelSerializer):
         return customer.app.slug if customer.app else None
 
 
+class EventSerializer(serializers.Serializer):
+    """Un événement Stripe, et ce que le service en a fait.
+
+    Le compte Stripe est partagé par toute la flotte : la liste contient donc
+    aussi des événements qui ne nous concernent pas. `handled` le dit, sinon un
+    opérateur cherche pourquoi un événement « n'a rien fait ».
+    """
+
+    id = serializers.CharField(read_only=True)
+    type = serializers.CharField(read_only=True)
+    created = serializers.DateTimeField(read_only=True)
+    livemode = serializers.BooleanField(read_only=True)
+    handled = serializers.SerializerMethodField()
+    app_slug = serializers.SerializerMethodField()
+    external_user_id = serializers.SerializerMethodField()
+
+    def get_handled(self, event):
+        """Vrai si ce type d'événement déclenche un recalcul de droit chez nous."""
+        from .webhooks import SUBSCRIPTION_EVENTS
+
+        return event.type in SUBSCRIPTION_EVENTS
+
+    def _cible(self, event):
+        from .webhooks import resolve_target
+
+        objet = (event.data or {}).get("object") if event.data else None
+        return resolve_target(objet)
+
+    def get_app_slug(self, event):
+        """Vide quand l'événement n'est attribuable à aucune app — ni `metadata`,
+        ni `client_reference_id`. Le webhook l'a alors ignoré en silence, et c'est
+        précisément le cas qu'un opérateur doit pouvoir repérer."""
+        app, _ = self._cible(event)
+        return app.slug if app else ""
+
+    def get_external_user_id(self, event):
+        _, user_id = self._cible(event)
+        return user_id or ""
+
+
 class PriceSerializer(serializers.Serializer):
     """Un prix Stripe miré, tel que le sélecteur de la page Plans l'affiche.
 

@@ -7,6 +7,7 @@ from .admin_views import (
     DashboardView,
     DeliveryViewSet,
     EntitlementViewSet,
+    EventViewSet,
     InvoiceViewSet,
     PlanViewSet,
     PriceViewSet,
@@ -22,6 +23,7 @@ router.register("customers", CustomerViewSet, basename="admin-customer")
 router.register("entitlements", EntitlementViewSet, basename="admin-entitlement")
 router.register("deliveries", DeliveryViewSet, basename="admin-delivery")
 router.register("invoices", InvoiceViewSet, basename="admin-invoice")
+router.register("events", EventViewSet, basename="admin-event")
 
 app_name = "billing_admin"
 
