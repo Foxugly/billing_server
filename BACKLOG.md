@@ -4,9 +4,11 @@ Issu d'une revue de session (2026-07-29), après les lots L1→L3 et L5a. Sévé
 **P1** important · **P2/P3** à nettoyer. Le travail coché est commité/poussé sur
 `Foxugly/billing_server` (`main`, CI verte).
 
-État vérifié le 2026-07-29 : units `billing-gunicorn` / `-celery` / `-celery-beat` /
-`-env-fetch` / `-frontend-runtime-fetch` actives, `/health/` 200, console 200, aucune erreur
-en 24 h de journaux, 185 tests verts, 1 livraison `delivered` / 0 `failed`.
+État vérifié le 2026-07-29, après les PR #15/#16/#17 déployées : units `billing-gunicorn` /
+`-celery` / `-celery-beat` / `-env-fetch` / `-frontend-runtime-fetch` actives, `/health/` 200,
+console 200, `/api/v1/admin/apps/` 401 et `/api/admin/apps/` 404 (l'alias est bien retiré),
+migration `0005` appliquée, aucune erreur dans les journaux, 184 tests verts, 1 livraison
+`delivered` / 0 `failed`.
 
 ---
 
@@ -53,14 +55,16 @@ en 24 h de journaux, 185 tests verts, 1 livraison `delivered` / 0 `failed`.
   - **poker** — 5 réécritures en 7 jours, dont 4 étaient la suite de tests de ce dépôt (corrigé,
     voir plus haut) et une un appel navigateur du 2026-07-28 (`/api/teams/`), vraisemblablement
     un bundle en cache. À re-vérifier après une fenêtre calme.
-- [ ] **P3 — Hygiène Sentry.** `billing-backend` : 7 issues non résolues, toutes ponctuelles et
-  issues de sessions `manage.py shell` manuelles (dont le `celerybeat-schedule` permission denied,
-  571 events, corrigé par la PR #5 et muet depuis). `billing-frontend` : 1 violation CSP du
-  2026-07-28 12:37–12:40, antérieure au correctif nonce et jamais revue depuis. Rien de vivant :
-  à passer en résolu pour que la boîte redevienne un signal.
-  *Observation au passage : une erreur dans une commande de gestion (`manage.py shell`, scripts
-  d'audit) remonte à Sentry comme une erreur applicative. Un filtre `before_send` sur les
-  commandes de gestion rendrait la boîte plus fiable — à arbitrer.*
+- [x] **P3 — Hygiène Sentry (2026-07-29).** Les 7 issues `billing-backend` et l'unique
+  `billing-frontend` passées en résolu, chacune avec le motif en commentaire : le
+  `celerybeat-schedule` permission denied (571 events, corrigé par la PR #5 et muet depuis), le
+  `djstripe` absent du venv pendant L2, quatre erreurs ponctuelles de sessions `manage.py shell`
+  manuelles, et la violation CSP antérieure au correctif nonce. Rien de vivant.
+- [ ] **P3 — Une erreur de commande de gestion remonte comme une erreur applicative.** Quatre des
+  huit issues ci-dessus étaient des fautes de frappe dans des `manage.py shell` d'audit. Une boîte
+  Sentry qui mélange ça avec de vraies erreurs de production cesse d'être un signal. Un
+  `before_send` qui écarte (ou étiquette) ce qui vient d'une commande de gestion la rendrait
+  fiable — à arbitrer.
 - [ ] **P3 — Les fixtures de test portent des hôtes de production.** 49 occurrences de
   `foxugly.com` dans les tests (`base_url` des apps, `success_url`…). Le garde-fou réseau rend
   la fuite impossible aujourd'hui, mais des hôtes non routables (`.invalid`, RFC 2606)
