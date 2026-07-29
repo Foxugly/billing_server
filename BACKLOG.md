@@ -12,6 +12,17 @@ en 24 h de journaux, 185 tests verts, 1 livraison `delivered` / 0 `failed`.
 
 ## ✅ Fait le 2026-07-29
 
+- [x] **P1 — La suite de tests postait sur la production.** Les quatre tests de webhook
+  laissaient partir la livraison : `CELERY_TASK_ALWAYS_EAGER` est actif en test, donc le
+  `deliver_entitlement.delay()` déclenché par le webhook s'exécutait dans le processus de test
+  et **postait pour de bon sur `https://poker-api.foxugly.com`** — 4 requêtes par exécution, à
+  chaque `pytest` local et à chaque job CI (retrouvées dans `poker-access.log`). Rien ne le
+  signalait : la prod répondait 401, le code de livraison traite un échec comme une reprise à
+  programmer, et les tests restaient verts. **Seule la signature HMAC a empêché l'écriture de
+  droits fictifs en production** — ce n'était pas le garde-fou prévu pour ça, juste celui qui a
+  tenu. Corrigé par un `conftest.py` à la racine qui refuse tout appel réseau réel (héritant de
+  `BaseException`, sans quoi le `except Exception` de la livraison l'avalerait), plus un patch
+  de `deliver_entitlement.delay` dans les tests de webhook, qui portent sur la mise en file.
 - [x] **P1 — Le défaut de `App.entitlement_path` était resté le chemin legacy.**
   `default="/api/billing/entitlement/"` → `/api/v1/billing/entitlement/` (migration `0005`).
   Les deux lignes en production (poker, pushit) avaient été corrigées à la main lors du passage
@@ -42,6 +53,11 @@ en 24 h de journaux, 185 tests verts, 1 livraison `delivered` / 0 `failed`.
   *Observation au passage : une erreur dans une commande de gestion (`manage.py shell`, scripts
   d'audit) remonte à Sentry comme une erreur applicative. Un filtre `before_send` sur les
   commandes de gestion rendrait la boîte plus fiable — à arbitrer.*
+- [ ] **P3 — Les fixtures de test portent des hôtes de production.** 49 occurrences de
+  `foxugly.com` dans les tests (`base_url` des apps, `success_url`…). Le garde-fou réseau rend
+  la fuite impossible aujourd'hui, mais des hôtes non routables (`.invalid`, RFC 2606)
+  supprimeraient la classe entière de risque. Diff mécanique mais large, et quelques tests
+  d'anti-redirection ouverte dépendent du domaine : à faire d'un bloc, pas en passant.
 - [ ] **P3 — Tests de la console très minces.** 2 fichiers `.spec.ts` (`auth.service`,
   `entitlements-list`) pour 7 features. La CI est verte, mais elle ne prouve pas grand-chose au
   delà de la compilation.
