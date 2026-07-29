@@ -109,12 +109,18 @@ Découpage complet : `docs/superpowers/specs/2026-07-28-billing-central-design.m
 
 - **L4 — Poker consommateur** : fait, et au-delà du plan (PushIT l'est aussi ; les deux apps sont
   seedées, 4 plans actifs, une livraison poussée et acquittée).
-- **L6 — mise en service réelle** : **runbook écrit**
-  (`docs/superpowers/plans/2026-07-29-billing-l6-mise-en-service.md`), exécution en attente. Ce lot
-  n'est presque pas du code : plusieurs étapes sont des gestes irréversibles dans le dashboard
-  Stripe d'un compte live, et elles engagent fiscalement la société — elles reviennent à Renaud,
-  pas à l'agent. **Ce qui bloque :** l'étape 0 (numérotation au niveau du compte, non rétroactive,
-  à faire avant la première facture) et les clés du mode test pour la répétition.
+- **L6 — mise en service réelle** : **fait à l'exception de deux réglages de dashboard.** Le compte
+  live a été interrogé le 2026-07-29 : Stripe Tax `active`, inscription TVA **BE `oss_union`**
+  (vérifiée par calcul à blanc — BE 21 %, FR 20 %, US 0 %), les 8 prix en `tax_behavior=exclusive`,
+  Poker basculé (`/poker/prod` sans aucun `STRIPE_*`), un seul endpoint webhook vers `billing-api`.
+  **Restent deux gestes, tous deux avant la première facture émise et tous deux dans le dashboard :**
+  la **numérotation au niveau du compte** (non rétroactive, et non lisible par l'API), et le
+  **numéro de TVA de l'émetteur sur les factures** (`default_account_tax_ids` est `null`, le compte
+  n'a aucun `TaxId` — à confirmer dans le modèle de facture, qui peut le porter autrement).
+  Détail et vérifications : `docs/superpowers/plans/2026-07-29-billing-l6-mise-en-service.md`.
+  *Le runbook avait d'abord été écrit depuis la spec et non depuis l'état réel : il présentait le
+  fiscal, l'audit des prix et le cutover comme restant à faire, alors qu'ils étaient exécutés. Sur
+  un compte live, un runbook périmé fait refaire des gestes déjà faits.*
 - **L7 — facturation directe (consulting)** : **fait côté code** (2026-07-29), en attente de la
   répétition en mode test. `core/invoicing.py` + API console + page « Factures » : client direct,
   lignes, brouillon → finalisation → envoi, « marquer payée » hors Stripe, export CSV, codes
