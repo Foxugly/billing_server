@@ -14,9 +14,17 @@ def test_app_slug_is_unique():
 
 @pytest.mark.django_db
 def test_app_has_a_default_entitlement_path():
+    """Le défaut doit être le chemin canonique de la flotte, pas l'ancien.
+
+    Une app créée avec le chemin legacy `/api/billing/entitlement/` échoue en
+    silence : l'alias transitoire ne couvre pas les endpoints signés (la
+    signature HMAC porte le chemin, OPERATIONS.md §3.18), donc chaque push est
+    refusé et rien ne le signale côté central.
+    """
     app = App.objects.create(slug="poker", name="Poker", base_url="https://poker-api.foxugly.com")
 
-    assert app.entitlement_path == "/api/billing/entitlement/"
+    assert app.entitlement_path == "/api/v1/billing/entitlement/"
+    assert app.entitlement_url == "https://poker-api.foxugly.com/api/v1/billing/entitlement/"
     assert app.active is True
 
 
@@ -31,9 +39,15 @@ def test_app_generates_a_distinct_shared_secret_per_app():
 
 @pytest.mark.django_db
 def test_app_entitlement_url_joins_base_and_path():
-    app = App.objects.create(slug="poker", name="Poker", base_url="https://poker-api.foxugly.com/")
+    """Une seule barre oblique à la jointure, quel que soit le chemin configuré."""
+    app = App.objects.create(
+        slug="poker",
+        name="Poker",
+        base_url="https://poker-api.foxugly.com/",
+        entitlement_path="/sur-mesure/droits/",
+    )
 
-    assert app.entitlement_url == "https://poker-api.foxugly.com/api/billing/entitlement/"
+    assert app.entitlement_url == "https://poker-api.foxugly.com/sur-mesure/droits/"
 
 
 @pytest.mark.django_db
