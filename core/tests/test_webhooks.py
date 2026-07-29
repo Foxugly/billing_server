@@ -1,7 +1,22 @@
+from unittest.mock import patch
+
 import pytest
 
 from core.models import App, EntitlementDelivery, Plan
 from core.webhooks import handle_subscription_event, price_id_of, resolve_target
+
+
+@pytest.fixture(autouse=True)
+def ne_pas_livrer():
+    """Ces tests portent sur la mise en file, pas sur la livraison elle-même.
+
+    Sans ce patch, `CELERY_TASK_ALWAYS_EAGER` fait partir la livraison dans le
+    processus de test — et elle sortait réellement sur l'API de production (voir
+    le `conftest.py` de la racine). La livraison a ses propres tests, avec le
+    transport HTTP simulé : `core/tests/test_delivery.py`.
+    """
+    with patch("core.tasks.deliver_entitlement.delay") as delay:
+        yield delay
 
 
 @pytest.fixture
@@ -58,7 +73,7 @@ def test_an_event_for_an_unknown_app_is_ignored_without_error():
 
 
 @pytest.mark.django_db
-def test_a_subscription_event_recomputes_and_queues_a_delivery(app):
+def test_a_subscription_event_recomputes_and_queues_a_delivery(app, ne_pas_livrer):
     obj = {
         "metadata": {"app": "poker", "external_user_id": "42"},
         "status": "active",
@@ -73,6 +88,9 @@ def test_a_subscription_event_recomputes_and_queues_a_delivery(app):
     assert delivery.payload["is_paid"] is True
     assert delivery.payload["stripe_customer_id"] == "cus_123"
     assert delivery.payload["current_period_end"] is not None
+    # La mise en file est le contrat de ce chemin : la livraison doit être confiée
+    # à Celery, pas exécutée par le webhook.
+    ne_pas_livrer.assert_called_once_with(str(delivery.pk))
 
 
 @pytest.mark.django_db
