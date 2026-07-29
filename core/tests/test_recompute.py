@@ -9,7 +9,7 @@ from core.services import period_end_of, recompute_entitlement
 
 @pytest.fixture
 def app(db):
-    return App.objects.create(slug="poker", name="Poker", base_url="https://poker-api.foxugly.com")
+    return App.objects.create(slug="poker", name="Poker", base_url="https://poker-api.foxugly.invalid")
 
 
 @pytest.fixture

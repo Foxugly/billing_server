@@ -43,7 +43,7 @@ def test_the_catalogue_only_exposes_public_and_active_plans(app, plan, signed_ge
 
 @pytest.mark.django_db
 def test_an_app_never_sees_another_apps_catalogue(app, signed_get):
-    other = App.objects.create(slug="tm", name="TM", base_url="https://tm-api.foxugly.com")
+    other = App.objects.create(slug="tm", name="TM", base_url="https://tm-api.foxugly.invalid")
     Plan.objects.create(app=other, code="club", name="Club")
 
     response = signed_get("/api/v1/plans/", app)
@@ -75,7 +75,7 @@ def test_the_pull_creates_a_missing_entitlement_rather_than_404(app, signed_get)
 
 @pytest.mark.django_db
 def test_an_app_cannot_read_another_apps_entitlement(app, signed_get):
-    App.objects.create(slug="tm", name="TM", base_url="https://tm-api.foxugly.com")
+    App.objects.create(slug="tm", name="TM", base_url="https://tm-api.foxugly.invalid")
 
     response = signed_get("/api/v1/entitlements/tm/42/", app)
 
@@ -135,7 +135,7 @@ def test_checkout_refuses_a_return_url_on_a_foreign_domain(app, plan, signed_pos
                 "plan": "team1",
                 "interval": "monthly",
                 "success_url": "https://attaquant.example/ok",
-                "cancel_url": "https://poker.foxugly.com/ko",
+                "cancel_url": "https://poker.foxugly.invalid/ko",
             },
             app,
         )
@@ -162,8 +162,8 @@ def test_checkout_creates_the_session_with_tax_and_identifying_metadata(
                 "email": "alice@x.be",
                 "plan": "team1",
                 "interval": "monthly",
-                "success_url": "https://poker.foxugly.com/teams?billing=success",
-                "cancel_url": "https://poker.foxugly.com/teams?billing=cancel",
+                "success_url": "https://poker.foxugly.invalid/teams?billing=success",
+                "cancel_url": "https://poker.foxugly.invalid/teams?billing=cancel",
             },
             app,
         )
@@ -201,8 +201,8 @@ def test_checkout_reuses_an_existing_app_customer(app, plan, signed_post, stripe
                 "email": "nouvelle@x.be",
                 "plan": "team1",
                 "interval": "monthly",
-                "success_url": "https://poker.foxugly.com/ok",
-                "cancel_url": "https://poker.foxugly.com/ko",
+                "success_url": "https://poker.foxugly.invalid/ok",
+                "cancel_url": "https://poker.foxugly.invalid/ko",
             },
             app,
         )
@@ -218,7 +218,7 @@ def test_checkout_reuses_an_existing_app_customer(app, plan, signed_post, stripe
 def test_the_portal_refuses_when_there_is_no_stripe_customer(app, signed_post, stripe_keys):
     response = signed_post(
         "/api/v1/portal/",
-        {"external_user_id": "42", "return_url": "https://poker.foxugly.com/teams"},
+        {"external_user_id": "42", "return_url": "https://poker.foxugly.invalid/teams"},
         app,
     )
 
@@ -237,7 +237,7 @@ def test_the_portal_returns_a_session_url(app, signed_post, stripe_keys):
     with patch("core.api_views.stripe_client", return_value=fake_stripe):
         response = signed_post(
             "/api/v1/portal/",
-            {"external_user_id": "42", "return_url": "https://poker.foxugly.com/teams"},
+            {"external_user_id": "42", "return_url": "https://poker.foxugly.invalid/teams"},
             app,
         )
 
@@ -270,8 +270,8 @@ def test_checkout_forwards_the_requested_quantity(app, plan, signed_post, stripe
             "/api/v1/checkout/",
             {
                 "external_user_id": "42", "plan": "team1", "interval": "monthly", "quantity": 5,
-                "success_url": "https://poker.foxugly.com/ok",
-                "cancel_url": "https://poker.foxugly.com/ko",
+                "success_url": "https://poker.foxugly.invalid/ok",
+                "cancel_url": "https://poker.foxugly.invalid/ko",
             },
             app,
         )
@@ -369,8 +369,8 @@ def test_checkout_refuses_a_second_subscription_for_the_same_customer(
                 "external_user_id": "42",
                 "plan": "team1",
                 "interval": "monthly",
-                "success_url": "https://poker.foxugly.com/ok",
-                "cancel_url": "https://poker.foxugly.com/ko",
+                "success_url": "https://poker.foxugly.invalid/ok",
+                "cancel_url": "https://poker.foxugly.invalid/ko",
             },
             app,
         )
@@ -401,8 +401,8 @@ def test_checkout_proceeds_when_the_previous_subscription_is_over(
                 "external_user_id": "42",
                 "plan": "team1",
                 "interval": "monthly",
-                "success_url": "https://poker.foxugly.com/ok",
-                "cancel_url": "https://poker.foxugly.com/ko",
+                "success_url": "https://poker.foxugly.invalid/ok",
+                "cancel_url": "https://poker.foxugly.invalid/ko",
             },
             app,
         )
@@ -430,8 +430,8 @@ def test_checkout_reuses_the_known_stripe_customer(app, plan, signed_post, strip
                 "external_user_id": "42",
                 "plan": "team1",
                 "interval": "monthly",
-                "success_url": "https://poker.foxugly.com/ok",
-                "cancel_url": "https://poker.foxugly.com/ko",
+                "success_url": "https://poker.foxugly.invalid/ok",
+                "cancel_url": "https://poker.foxugly.invalid/ko",
             },
             app,
         )
@@ -459,8 +459,8 @@ def test_a_first_checkout_identifies_the_customer_by_email(app, plan, signed_pos
                 "email": "nouveau@example.com",
                 "plan": "team1",
                 "interval": "monthly",
-                "success_url": "https://poker.foxugly.com/ok",
-                "cancel_url": "https://poker.foxugly.com/ko",
+                "success_url": "https://poker.foxugly.invalid/ok",
+                "cancel_url": "https://poker.foxugly.invalid/ko",
             },
             app,
         )

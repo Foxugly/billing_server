@@ -23,7 +23,7 @@ def staff_client(db, django_user_model):
 
 @pytest.fixture
 def app(db):
-    return App.objects.create(slug="poker", name="Poker", base_url="https://poker-api.foxugly.com")
+    return App.objects.create(slug="poker", name="Poker", base_url="https://poker-api.foxugly.invalid")
 
 
 def _event(id, type, objet=None, created=None):

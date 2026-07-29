@@ -14,13 +14,13 @@ def test_stripe_is_not_configured_without_keys(settings):
 
 @pytest.mark.django_db
 def test_the_app_own_api_host_is_allowed(app):
-    assert url_is_allowed_for(app, "https://poker-api.foxugly.com/retour") is True
+    assert url_is_allowed_for(app, "https://poker-api.foxugly.invalid/retour") is True
 
 
 @pytest.mark.django_db
 def test_a_sibling_subdomain_is_allowed(app):
-    """Le SPA vit sur poker.foxugly.com quand l'API est sur poker-api.foxugly.com."""
-    assert url_is_allowed_for(app, "https://poker.foxugly.com/teams?billing=success") is True
+    """Le SPA vit sur poker.foxugly.invalid quand l'API est sur poker-api.foxugly.invalid."""
+    assert url_is_allowed_for(app, "https://poker.foxugly.invalid/teams?billing=success") is True
 
 
 @pytest.mark.django_db
@@ -31,12 +31,12 @@ def test_an_arbitrary_domain_is_refused(app):
 
 @pytest.mark.django_db
 def test_a_lookalike_domain_is_refused(app):
-    assert url_is_allowed_for(app, "https://foxugly.com.attaquant.example/") is False
+    assert url_is_allowed_for(app, "https://foxugly.invalid.attaquant.example/") is False
 
 
 @pytest.mark.django_db
 def test_plain_http_is_refused(app):
-    assert url_is_allowed_for(app, "http://poker.foxugly.com/") is False
+    assert url_is_allowed_for(app, "http://poker.foxugly.invalid/") is False
 
 
 @pytest.mark.django_db

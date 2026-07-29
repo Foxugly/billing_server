@@ -114,7 +114,7 @@ def test_the_ping_runs_server_side(staff_client, app):
 
 @pytest.mark.django_db
 def test_plans_can_be_filtered_by_app(staff_client, app):
-    other = App.objects.create(slug="tm", name="TM", base_url="https://tm-api.foxugly.com")
+    other = App.objects.create(slug="tm", name="TM", base_url="https://tm-api.foxugly.invalid")
     Plan.objects.create(app=app, code="team1", name="1 équipe")
     Plan.objects.create(app=other, code="club", name="Club")
 
