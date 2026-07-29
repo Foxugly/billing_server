@@ -4,11 +4,13 @@ Issu d'une revue de session (2026-07-29), après les lots L1→L3, L5a, la conso
 Sévérités : **P1** important · **P2/P3** à nettoyer. Le travail coché est commité/poussé sur
 `Foxugly/billing_server` (`main`, CI verte).
 
-État vérifié le 2026-07-29, après les PR #15 à #20 déployées : units `billing-gunicorn` /
+État vérifié le 2026-07-29, après les PR #15 à #24 déployées : units `billing-gunicorn` /
 `-celery` / `-celery-beat` / `-env-fetch` / `-frontend-runtime-fetch` actives, `/health/` 200,
 console 200, `/api/v1/admin/apps/` 401 et `/api/admin/apps/` 404 (l'alias est bien retiré),
-migration `0005` appliquée, aucune erreur dans les journaux, **211 tests backend** et **24 tests
-console** verts, 1 livraison `delivered` / 0 `failed`.
+migration `0005` appliquée, aucune erreur dans les journaux, **256 tests backend** et **47 tests
+console** verts, 1 livraison `delivered` / 0 `failed`. Les quatre dépôts touchés (`billing_server`,
+`billing_frontend`, `Poker_server`, `QuizOnline`) sont sur `main`, propres, sans PR ouverte, et
+leur dernier déploiement est vert.
 
 **Aucun compte ni client en production** — 0 `AppCustomer`, 0 `Event` Stripe traité. C'est ce qui
 a permis de trancher plusieurs arbitrages de cette revue sans précaution particulière.
@@ -39,9 +41,20 @@ a permis de trancher plusieurs arbitrages de cette revue sans précaution partic
 
 ## À faire
 
-- [ ] **P2 — Il manque la page « Événements Stripe » du §10.** Liste des `djstripe.Event` avec
-  statut de traitement et rejeu : ni page ni viewset, c'est un lot backend + frontend. Tout le
-  reste du §10 est livré — dashboard, apps, plans, clients, droits, livraisons, factures.
+**Rien. Tous les points relevés à la revue du 2026-07-29 sont clos** — voir la liste ci-dessous.
+Ce qui reste à faire sur le service n'est pas de la dette mais de la roadmap : le lot L6, plus bas.
+
+---
+
+## ✅ Clos le 2026-07-29 (suite)
+
+- [x] **P2 — Page « Événements Stripe » livrée.** `billing_server` PR #22 (+9 tests) et
+  `billing_frontend` PR #5 (+5). Le §10 du design est complet. La page distingue trois états, dont
+  deux se ressemblent et n'ont rien à voir : un type dont le service ne fait rien (normal sur un
+  compte Stripe partagé par la flotte), un type traité mais **non attribuable** faute de `metadata`
+  et de `client_reference_id` — celui-là, le webhook l'a ignoré en silence, il est en rouge — et le
+  cas nominal. Le rejeu rappelle le traitement sans rien redemander à Stripe, et refuse en 400 sur
+  un type sans traitement associé plutôt que de faire croire à un rejeu réussi.
 - [x] **P3 — Middleware d'alias `/api/` → `/api/v1/` retiré (2026-07-29).** Une seule réécriture
   journalisée depuis sa mise en place (le 2026-07-28, à la vérification post-déploiement), et les
   deux consommateurs signent déjà `/api/v1/` (`billing/client.py:91` des deux côtés) : le critère
@@ -61,20 +74,27 @@ a permis de trancher plusieurs arbitrages de cette revue sans précaution partic
   `celerybeat-schedule` permission denied (571 events, corrigé par la PR #5 et muet depuis), le
   `djstripe` absent du venv pendant L2, quatre erreurs ponctuelles de sessions `manage.py shell`
   manuelles, et la violation CSP antérieure au correctif nonce. Rien de vivant.
-- [ ] **P3 — Une erreur de commande de gestion remonte comme une erreur applicative.** Quatre des
-  huit issues ci-dessus étaient des fautes de frappe dans des `manage.py shell` d'audit. Une boîte
-  Sentry qui mélange ça avec de vraies erreurs de production cesse d'être un signal. Un
-  `before_send` qui écarte (ou étiquette) ce qui vient d'une commande de gestion la rendrait
-  fiable — à arbitrer.
-- [ ] **P3 — Les fixtures de test portent des hôtes de production.** 49 occurrences de
-  `foxugly.com` dans les tests (`base_url` des apps, `success_url`…). Le garde-fou réseau rend
-  la fuite impossible aujourd'hui, mais des hôtes non routables (`.invalid`, RFC 2606)
-  supprimeraient la classe entière de risque. Diff mécanique mais large, et quelques tests
-  d'anti-redirection ouverte dépendent du domaine : à faire d'un bloc, pas en passant.
-- [ ] **P3 — Tests de la console encore minces.** 4 fichiers `.spec.ts` (`auth.service`,
-  `entitlements-list`, `invoices-list`, `plans-list`) pour 9 features. Ce qui compte est couvert —
-  la conversion euros→centimes, le vidage des quotas d'un plan à l'unité — mais les pages de
-  lecture ne le sont pas.
+- [x] **P3 — Le bruit d'atelier ne remonte plus comme une erreur de production.** PR #23. Le
+  `before_send` **étiquette** l'événement avec la commande de gestion qui l'a produit, et **tait**
+  le `shell` / `dbshell`. La distinction est le fond du sujet : un `sync_entitlements` qui échoue
+  reste une panne — la réconciliation quotidienne est un rouage de production — et `migrate` /
+  `collectstatic` aussi. Seule la session interactive est écartée : sa trace est déjà sous les yeux
+  de celui qui l'a provoquée. Filtre vérifié présent sur la box.
+- [x] **P3 — Plus aucun hôte de production dans les fixtures.** PR #24. 51 occurrences remplacées
+  par `.invalid` (RFC 2606, garanti non résolvable), et un test paramétré qui refuse le domaine de
+  prod **fichier par fichier** — sinon la prochaine fixture le réintroduit. Le garde-fou réseau du
+  `conftest.py` arrêtait l'effet ; ceci s'attaque à la cause. Les formes qui portaient une intention
+  gardent leur géométrie : sous-domaine frère (`poker.foxugly.invalid` face à
+  `poker-api.foxugly.invalid`) et domaine sosie (`foxugly.invalid.attaquant.example`), donc les
+  tests d'anti-redirection ouverte testent toujours la même chose.
+- [x] **P3 — Pages de lecture de la console couvertes.** `billing_frontend` PR #6, +18 tests
+  (47 au total). Les tests visent ce que ces pages **décident** : centimes rendus en euros, un ping
+  refusé signalé en erreur — l'appel HTTP a réussi, c'est la signature qui a été refusée, et un
+  toast vert ferait conclure à un câblage correct —, filtres vides non envoyés, `?status=failed`
+  du tableau de bord respecté, statut inconnu peint en rouge et non en vert.
+  **Un vrai défaut trouvé en les écrivant** : `DashboardComponent.load()` n'avait aucun `catch`, donc
+  un échec de chargement partait en rejection non gérée et la page restait muette — ni chiffres, ni
+  erreur. Elle affiche désormais un message, comme les autres.
 - [x] **P2 — Les libellés communs manquaient dans les catalogues (2026-07-29).** `common.status`,
   `common.actions`, `common.active`, `common.inactive`, `common.save`, `common.close` et
   `common.search` n'existaient nulle part : Transloco rendant la clé quand la traduction manque,
