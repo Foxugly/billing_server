@@ -73,7 +73,7 @@ def test_without_push_diff_nothing_is_emitted(app):
 
 @pytest.mark.django_db
 def test_the_app_filter_restricts_the_scope(app):
-    other = App.objects.create(slug="tm", name="TM", base_url="https://tm-api.foxugly.com")
+    other = App.objects.create(slug="tm", name="TM", base_url="https://tm-api.foxugly.invalid")
     Entitlement.objects.create(app=app, external_user_id="42")
     Entitlement.objects.create(app=other, external_user_id="7")
 

@@ -111,8 +111,8 @@ def test_the_customer_can_adjust_the_quantity_on_the_checkout_page(app, signed_p
         signed_post(
             "/api/v1/checkout/",
             {"external_user_id": "42", "plan": "app", "interval": "monthly",
-             "success_url": "https://poker.foxugly.com/ok",
-             "cancel_url": "https://poker.foxugly.com/ko"},
+             "success_url": "https://poker.foxugly.invalid/ok",
+             "cancel_url": "https://poker.foxugly.invalid/ko"},
             app,
         )
 
@@ -141,8 +141,8 @@ def test_the_quantity_is_locked_during_a_trial(app, signed_post, settings):
         signed_post(
             "/api/v1/checkout/",
             {"external_user_id": "42", "plan": "app", "interval": "monthly",
-             "success_url": "https://poker.foxugly.com/ok",
-             "cancel_url": "https://poker.foxugly.com/ko"},
+             "success_url": "https://poker.foxugly.invalid/ok",
+             "cancel_url": "https://poker.foxugly.invalid/ko"},
             app,
         )
 
@@ -170,8 +170,8 @@ def test_a_flat_plan_is_never_adjustable(app, signed_post, settings):
         signed_post(
             "/api/v1/checkout/",
             {"external_user_id": "42", "plan": "unlimited", "interval": "monthly",
-             "success_url": "https://poker.foxugly.com/ok",
-             "cancel_url": "https://poker.foxugly.com/ko"},
+             "success_url": "https://poker.foxugly.invalid/ok",
+             "cancel_url": "https://poker.foxugly.invalid/ko"},
             app,
         )
 

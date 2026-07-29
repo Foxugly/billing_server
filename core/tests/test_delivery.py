@@ -75,7 +75,7 @@ def test_it_posts_to_the_app_entitlement_url(delivery, app):
     with patch("core.tasks.requests.post", return_value=FakeResponse(200)) as post:
         deliver_entitlement(delivery.pk)
 
-    assert post.call_args.args[0] == "https://poker-api.foxugly.com/api/v1/billing/entitlement/"
+    assert post.call_args.args[0] == "https://poker-api.foxugly.invalid/api/v1/billing/entitlement/"
 
 
 @pytest.mark.django_db
