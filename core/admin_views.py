@@ -23,6 +23,7 @@ from .admin_serializers import (
     AppSerializer,
     EntitlementDeliverySerializer,
     EntitlementSerializer,
+    EventSerializer,
     InvoiceDraftSerializer,
     InvoiceSerializer,
     PlanSerializer,
@@ -99,6 +100,73 @@ class PlanViewSet(StaffViewSet):
         queryset = super().get_queryset()
         app_slug = self.request.query_params.get("app")
         return queryset.filter(app__slug=app_slug) if app_slug else queryset
+
+
+class EventViewSet(viewsets.ViewSet):
+    """Les événements Stripe reçus, et leur rejeu.
+
+    Le rejeu réémet le signal dj-stripe : notre récepteur repasse dessus et
+    recalcule le droit. Le vrai usage est un bug de traitement corrigé — on
+    repasse les événements qui en ont souffert sans rien redemander à Stripe.
+    Sans effet de bord fâcheux : le recalcul est idempotent.
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+
+    def _evenements(self):
+        from djstripe.models import Event
+
+        return Event.objects.order_by("-created")
+
+    def list(self, request):
+        from .webhooks import SUBSCRIPTION_EVENTS
+
+        evenements = self._evenements()
+        if motif := request.query_params.get("type"):
+            evenements = evenements.filter(type__icontains=motif)
+        if request.query_params.get("handled") == "true":
+            evenements = evenements.filter(type__in=SUBSCRIPTION_EVENTS)
+        return Response(EventSerializer(list(evenements), many=True).data)
+
+    @action(detail=True, methods=["post"])
+    def replay(self, request, pk=None):
+        from djstripe.models import Event
+
+        from .webhooks import SUBSCRIPTION_EVENTS, handle_subscription_event
+
+        # `id` et non `pk` : la clé primaire de dj-stripe est un entier interne
+        # (`djstripe_id`), l'identifiant Stripe `evt_…` vit dans `id`.
+        evenement = Event.objects.filter(id=pk).first()
+        if evenement is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        if evenement.type not in SUBSCRIPTION_EVENTS:
+            # Réémettre le signal ne ferait rien : autant le dire plutôt que de
+            # laisser croire à un rejeu réussi.
+            return Response(
+                {"detail": f"Aucun traitement n'est associé au type « {evenement.type} »."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # On appelle le traitement directement, sans passer par le signal : le
+        # signal est le chemin de Stripe, avec sa vérification de signature et sa
+        # mise à jour du miroir, déjà faites la première fois.
+        livraison = handle_subscription_event(
+            (evenement.data or {}).get("object") if evenement.data else None
+        )
+        logger.info("event_replayed", extra={"event": evenement.id, "type": evenement.type})
+        return Response(
+            {
+                "id": evenement.id,
+                "type": evenement.type,
+                "delivery": str(livraison.pk) if livraison else None,
+                "detail": (
+                    "Droit recalculé et livraison mise en file."
+                    if livraison
+                    else "Événement non attribuable à une app : rien à recalculer."
+                ),
+            }
+        )
 
 
 class PriceViewSet(viewsets.ViewSet):
