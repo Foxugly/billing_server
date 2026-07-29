@@ -40,11 +40,19 @@ en 24 h de journaux, 185 tests verts, 1 livraison `delivered` / 0 `failed`.
     déjà là (`PlanViewSet`, `GET/POST /api/v1/admin/plans/`), il ne manque que la page Angular.
   - **Événements Stripe** (liste des `djstripe.Event` avec statut de traitement et rejeu) — ni
     page ni viewset : c'est un lot backend + frontend.
-- [ ] **P3 — Retirer le middleware d'alias `/api/` → `/api/v1/`.** `config/legacy_api_prefix.py`
-  + sa ligne dans `MIDDLEWARE`. Un seul `legacy_api_prefix` journalisé depuis la mise en place
-  (le 2026-07-28, à la vérification post-déploiement), rien depuis : personne n'appelle plus
-  l'ancien chemin, ce qui est exactement le critère de suppression de §3.18. À faire de concert
-  avec les consommateurs (`Poker_server`, `PushIT_server`), qui portent le même middleware.
+- [x] **P3 — Middleware d'alias `/api/` → `/api/v1/` retiré (2026-07-29).** Une seule réécriture
+  journalisée depuis sa mise en place (le 2026-07-28, à la vérification post-déploiement), et les
+  deux consommateurs signent déjà `/api/v1/` (`billing/client.py:91` des deux côtés) : le critère
+  de suppression de §3.18 était rempli. Un test pin désormais le 404 sur l'ancien préfixe.
+- [ ] **P3 — L'alias reste en place ailleurs dans la flotte, et c'est justifié pour l'instant.**
+  Relevé le 2026-07-29 sur les journaux de la box :
+  - **quizonline** — 595 réécritures en 3 jours, ~68/h de façon régulière jusqu'au 2026-07-29
+    08:20 UTC, puis plus rien. Un appelant automatique qui n'apparaît **pas** dans
+    `quizonline-access.log` : il ne passe donc pas par nginx. À identifier avant de retirer
+    quoi que ce soit.
+  - **poker** — 5 réécritures en 7 jours, dont 4 étaient la suite de tests de ce dépôt (corrigé,
+    voir plus haut) et une un appel navigateur du 2026-07-28 (`/api/teams/`), vraisemblablement
+    un bundle en cache. À re-vérifier après une fenêtre calme.
 - [ ] **P3 — Hygiène Sentry.** `billing-backend` : 7 issues non résolues, toutes ponctuelles et
   issues de sessions `manage.py shell` manuelles (dont le `celerybeat-schedule` permission denied,
   571 events, corrigé par la PR #5 et muet depuis). `billing-frontend` : 1 violation CSP du
