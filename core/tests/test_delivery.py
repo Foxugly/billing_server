@@ -62,7 +62,7 @@ def test_the_outgoing_request_is_signed_with_the_app_secret(delivery, app):
     body = post.call_args.kwargs["data"]
     # La signature couvre desormais la methode et le chemin de l'endpoint cible.
     expected = sign_payload(
-        app.shared_secret, "POST", "/api/billing/entitlement/", body,
+        app.shared_secret, "POST", "/api/v1/billing/entitlement/", body,
         int(headers["X-Foxugly-Timestamp"]),
     )
 
@@ -75,7 +75,7 @@ def test_it_posts_to_the_app_entitlement_url(delivery, app):
     with patch("core.tasks.requests.post", return_value=FakeResponse(200)) as post:
         deliver_entitlement(delivery.pk)
 
-    assert post.call_args.args[0] == "https://poker-api.foxugly.com/api/billing/entitlement/"
+    assert post.call_args.args[0] == "https://poker-api.foxugly.com/api/v1/billing/entitlement/"
 
 
 @pytest.mark.django_db

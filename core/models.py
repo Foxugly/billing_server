@@ -29,8 +29,12 @@ class App(models.Model):
     base_url = models.URLField(help_text="Racine de l'API de l'app, ex. https://poker-api.foxugly.com")
     entitlement_path = models.CharField(
         max_length=200,
-        default="/api/billing/entitlement/",
-        help_text="Chemin du endpoint qui reçoit les droits poussés.",
+        default="/api/v1/billing/entitlement/",
+        help_text=(
+            "Chemin du endpoint qui reçoit les droits poussés. Toute la flotte sert ses APIs "
+            "sous /api/v1/ (OPERATIONS.md §3.18) : un chemin legacy ici casse en silence, "
+            "car l'alias transitoire ne couvre pas les endpoints signés."
+        ),
     )
     shared_secret = models.CharField(max_length=100, default=generate_shared_secret)
     previous_shared_secret = models.CharField(
