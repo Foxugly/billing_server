@@ -9,6 +9,7 @@ from .admin_views import (
     EntitlementViewSet,
     InvoiceViewSet,
     PlanViewSet,
+    PriceViewSet,
     TaxCodeView,
 )
 
@@ -16,6 +17,7 @@ from .admin_views import (
 router = DefaultRouter()
 router.register("apps", AppViewSet, basename="admin-app")
 router.register("plans", PlanViewSet, basename="admin-plan")
+router.register("prices", PriceViewSet, basename="admin-price")
 router.register("customers", CustomerViewSet, basename="admin-customer")
 router.register("entitlements", EntitlementViewSet, basename="admin-entitlement")
 router.register("deliveries", DeliveryViewSet, basename="admin-delivery")
