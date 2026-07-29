@@ -186,11 +186,16 @@ SENTRY_DSN = env("SENTRY_DSN", default="")
 if STATE == "PROD" and SENTRY_DSN:
     import sentry_sdk
 
+    from config.sentry_filter import before_send as sentry_before_send
+
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         environment=env("SENTRY_ENVIRONMENT", default="production"),
         traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0),
         send_default_pii=False,
+        # Étiquette la commande de gestion, et tait le `shell` : une faute de
+        # frappe dans une session d'audit n'est pas une erreur de production.
+        before_send=sentry_before_send,
     )
 
 LOGGING = {
