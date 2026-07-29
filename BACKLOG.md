@@ -113,10 +113,17 @@ Découpage complet : `docs/superpowers/specs/2026-07-28-billing-central-design.m
   live a été interrogé le 2026-07-29 : Stripe Tax `active`, inscription TVA **BE `oss_union`**
   (vérifiée par calcul à blanc — BE 21 %, FR 20 %, US 0 %), les 8 prix en `tax_behavior=exclusive`,
   Poker basculé (`/poker/prod` sans aucun `STRIPE_*`), un seul endpoint webhook vers `billing-api`.
-  **Restent deux gestes, tous deux avant la première facture émise et tous deux dans le dashboard :**
-  la **numérotation au niveau du compte** (non rétroactive, et non lisible par l'API), et le
-  **numéro de TVA de l'émetteur sur les factures** (`default_account_tax_ids` est `null`, le compte
-  n'a aucun `TaxId` — à confirmer dans le modèle de facture, qui peut le porter autrement).
+  **Le n° de TVA de l'émetteur est réglé** (2026-07-29, plus tard dans la journée) :
+  `default_account_tax_ids = ["txi_1Tygg…"]` → `BE1004770045`. Toute facture émise le portera.
+  ⚠️ **Ce réglage n'est pas atteignable par l'API** : `Account.modify()` sur son propre compte
+  répond `PermissionError — you may only use it on connected accounts`. Il se fait au dashboard,
+  https://dashboard.stripe.com/settings/billing/invoices/general. Ne pas reperdre une heure dessus.
+
+  **Reste un seul geste, avant la première facture émise :** la **numérotation au niveau du compte**
+  (https://dashboard.stripe.com/settings/billing/invoice). Non rétroactive, et **non lisible par
+  l'API** — ni `Account.retrieve()` ni ailleurs. Déclarée faite par Renaud le 2026-07-29 ; c'est
+  donc le seul point de ce lot qui repose sur une parole et non sur une vérification. Le seul test
+  décisif consommerait le premier numéro de la séquence.
   Détail et vérifications : `docs/superpowers/plans/2026-07-29-billing-l6-mise-en-service.md`.
   *Le runbook avait d'abord été écrit depuis la spec et non depuis l'état réel : il présentait le
   fiscal, l'audit des prix et le cutover comme restant à faire, alors qu'ils étaient exécutés. Sur
