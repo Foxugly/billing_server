@@ -39,24 +39,38 @@ la chaîne complète n'a encore jamais tourné avec un vrai paiement.
 
 ---
 
-## Les deux seuls gestes qui restent **[R]**
-
-Les deux sont dans le dashboard, les deux sont à faire **avant la première facture émise**.
+## Ce qui reste **[R]**
 
 ### 1. La numérotation au niveau du compte — non rétroactive
 
 Détaillée à l'étape 0 ci-dessous. **Non vérifiable par l'API** : ni `Account.retrieve()` ni aucun
-autre point d'entrée n'expose le mode de numérotation. Il faut le lire dans le dashboard.
+autre point d'entrée n'expose le mode de numérotation. Il faut le lire dans le dashboard,
+https://dashboard.stripe.com/settings/billing/invoice — l'écran montre le préfixe (3 à 12
+caractères) et le champ *prochain numéro de séquence*.
 
-### 2. Le numéro de TVA de l'émetteur sur les factures
+**Déclarée faite par Renaud le 2026-07-29.** C'est le seul point de ce lot qui repose sur une
+parole et non sur une vérification, et c'est assumé : le seul test décisif serait d'émettre une
+vraie facture, ce qui consommerait le premier numéro de la séquence.
 
-`Account.settings.invoices.default_account_tax_ids` vaut **`null`**, et `TaxId.list()` du compte ne
-renvoie **aucun** numéro. En l'état, une facture émise ne porterait pas le numéro de TVA de Foxugly
-SRL — or une facture belge doit le porter.
+### 2. Le numéro de TVA de l'émetteur sur les factures — ✅ FAIT
 
-**Nuance :** le modèle de facture du dashboard peut le porter autrement (champ personnalisé, pied
-de page), et l'API ne le montrerait pas. C'est donc un signal fort, **pas une preuve**. À confirmer
-dans *Settings → Billing → Invoices → Invoice template* avant d'émettre.
+Réglé le 2026-07-29 : `Account.settings.invoices.default_account_tax_ids` vaut désormais
+`["txi_1TygghLJ7094uO171NQYscUX"]` → **`BE1004770045`**. Toute facture émise le portera.
+
+⚠️ **Ce réglage n'est pas atteignable par l'API.** `Account.modify()` sur son propre compte répond :
+
+```
+PermissionError: You cannot use this method on your own account:
+you may only use it on connected accounts.
+```
+
+Il se fait donc au dashboard : https://dashboard.stripe.com/settings/billing/invoices/general,
+section *informations fiscales de facturation*, en cochant le numéro comme valeur par défaut.
+Un numéro de TVA, une fois ajouté, n'est pas modifiable — il faut le supprimer et en recréer un.
+
+**Piège de vérification :** `Invoice.create_preview` renvoie `account_tax_ids: null` même une fois
+le réglage posé — l'aperçu n'applique pas les valeurs par défaut du compte. Vérifier sur
+`Account.retrieve()`, pas sur un aperçu.
 
 ---
 
