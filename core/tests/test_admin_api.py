@@ -222,19 +222,13 @@ def test_the_mrr_is_zero_without_any_priced_plan(staff_client, app):
 
 
 @pytest.mark.django_db
-def test_the_old_prefix_still_reaches_the_api_during_the_transition(staff_client, app):
-    """Backends et frontends se deploient separement : sans cet alias, un bundle
-    encore en cache prendrait un 404 pendant la fenetre de bascule."""
-    response = staff_client.get("/api/admin/apps/")
+def test_the_api_lives_only_under_the_canonical_prefix(staff_client, app):
+    """L'alias transitoire /api/ -> /api/v1/ a ete retire (OPERATIONS.md 3.18).
 
-    corps = response.json()
-    lignes = corps if isinstance(corps, list) else corps["results"]
-    assert response.status_code == 200
-    assert [a["slug"] for a in lignes] == [app.slug]
-
-
-@pytest.mark.django_db
-def test_the_alias_never_rewrites_a_path_already_canonical(staff_client, app):
-    """Sinon /api/v1/... deviendrait /api/v1/v1/... -- l'API entiere disparaitrait."""
+    Il n'existait que pour la fenetre de bascule, le temps qu'un bundle encore
+    en cache cesse d'appeler l'ancien chemin. Une seule reecriture a ete
+    journalisee depuis sa mise en place, celle de la verification de deploiement.
+    """
     assert staff_client.get("/api/v1/admin/apps/").status_code == 200
+    assert staff_client.get("/api/admin/apps/").status_code == 404
     assert staff_client.get("/api/v1/v1/admin/apps/").status_code == 404
