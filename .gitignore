@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 db.sqlite3
 staticfiles/
-.env
 .idea/
 .pytest_cache/
+
+# Secrets : `.env` seul ne couvre que le nom exact. Un `.env.e2e-backup`
+# porteur de SECRET_KEY / DB_PASSWORD a ete trouve non ignore sur
+# trainingmanager_server le 2026-07-31 — un `git add -A` l'aurait commite.
+.env
+.env.*
