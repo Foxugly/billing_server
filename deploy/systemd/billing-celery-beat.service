@@ -17,6 +17,15 @@ RuntimeDirectory=billing-beat
 RuntimeDirectoryMode=0750
 ExecStart=/var/www/django_websites/billing_server/.venv/bin/celery -A config beat -l info \
     --schedule /run/billing-beat/schedule
+# Hardening (OPERATIONS.md §3.22): no privilege escalation, private /tmp, read-only
+# system (/usr, /boot, /etc). Never ProtectSystem=strict: /var/www (media, beat schedule)
+# must stay writable.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
 Restart=always
 RestartSec=5
 KillMode=mixed

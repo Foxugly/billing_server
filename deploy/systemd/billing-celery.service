@@ -9,7 +9,19 @@ Group=www-data
 UMask=0027
 WorkingDirectory=/var/www/django_websites/billing_server
 EnvironmentFile=/run/billing/.env
-ExecStart=/var/www/django_websites/billing_server/.venv/bin/celery -A config worker -l info --concurrency=2
+# --pool=solo: the worker runs tasks itself, no child process. Rare, short tasks (webhook flush
+# every 5 min with an HTTP timeout, daily reconcile): two prefork children cost ~200 MB on a RAM-
+# bound box (OPERATIONS.md §3.22).
+ExecStart=/var/www/django_websites/billing_server/.venv/bin/celery -A config worker -l info --pool=solo
+# Hardening (OPERATIONS.md §3.22): no privilege escalation, private /tmp, read-only
+# system (/usr, /boot, /etc). Never ProtectSystem=strict: /var/www (media, beat schedule)
+# must stay writable.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
 Restart=always
 RestartSec=5
 KillMode=mixed
