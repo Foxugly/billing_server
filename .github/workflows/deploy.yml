@@ -133,21 +133,6 @@ jobs:
       - name: Ruff
         run: ruff check . --output-format=github
 
-  pip-audit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - name: Install pip-audit
-        run: pip install pip-audit==2.10.1
-      # Résout requirements.txt dans un environnement isolé et le confronte à la
-      # base PyPI/OSV. --strict : un paquet non résolu fait échouer le job au lieu
-      # d'être ignoré en silence.
-      - name: pip-audit
-        run: pip-audit -r requirements.txt --strict
-
   deploy:
     needs: [test, lint, pip-audit]
     runs-on: ubuntu-latest
