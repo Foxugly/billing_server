@@ -131,7 +131,7 @@ BILLING_APP_HOST_SUFFIXES = env.list("BILLING_APP_HOST_SUFFIXES", default=[".fox
 # 0 désactive la grâce. Réglable en SSM sans redéploiement.
 BILLING_GRACE_DAYS = env.int("BILLING_GRACE_DAYS", default=7)
 
-# --- Redis : broker Celery (db4) et cache Django (db9) ---------------------------
+# --- Redis : broker Celery (db4) et cache Django (db10) ---------------------------
 # db0 à db3 sont déjà pris sur la box (dont db3 par les Channels de Poker).
 REDIS_URL = env("REDIS_URL", default="")
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL or "memory://")
@@ -164,7 +164,7 @@ if REDIS_URL or CACHE_URL:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": CACHE_URL or REDIS_URL.rsplit("/", 1)[0] + "/9",
+            "LOCATION": CACHE_URL or REDIS_URL.rsplit("/", 1)[0] + "/10",
         }
     }
 else:
