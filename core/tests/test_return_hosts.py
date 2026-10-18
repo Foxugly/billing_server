@@ -156,24 +156,24 @@ def _seed():
 
 @pytest.mark.django_db
 def test_the_data_migration_seeds_the_spa_host_from_the_api_host():
-    """Les apps de prod (2026-10-18) renvoient toutes vers `<x>.foxugly.com`,
-    le frère de leur API `<x>-api.foxugly.com` (leur FRONTEND_BASE_URL)."""
-    poker = App.objects.create(slug="poker", name="Poker", base_url="https://poker-api.foxugly.com")
+    """Les apps de prod (2026-10-18) renvoient toutes vers `<x>.foxugly.invalid`,
+    le frère de leur API `<x>-api.foxugly.invalid` (leur FRONTEND_BASE_URL)."""
+    poker = App.objects.create(slug="poker", name="Poker", base_url="https://poker-api.foxugly.invalid")
     facil = App.objects.create(
-        slug="facilitation1", name="Facilitation", base_url="https://facilitation-api.foxugly.com/"
+        slug="facilitation1", name="Facilitation", base_url="https://facilitation-api.foxugly.invalid/"
     )
-    odd = App.objects.create(slug="odd", name="Sans -api", base_url="https://odd.foxugly.com")
+    odd = App.objects.create(slug="odd", name="Sans -api", base_url="https://odd.foxugly.invalid")
     done = App.objects.create(
-        slug="done", name="Déjà réglée", base_url="https://done-api.foxugly.com", return_hosts=["x.foxugly.com"]
+        slug="done", name="Déjà réglée", base_url="https://done-api.foxugly.invalid", return_hosts=["x.foxugly.invalid"]
     )
 
     _seed()(django_apps, None)
 
     for obj in (poker, facil, odd, done):
         obj.refresh_from_db()
-    assert poker.return_hosts == ["poker.foxugly.com"]
-    assert facil.return_hosts == ["facilitation.foxugly.com"]
+    assert poker.return_hosts == ["poker.foxugly.invalid"]
+    assert facil.return_hosts == ["facilitation.foxugly.invalid"]
     # Pas de frère devinable : rien n'est semé, l'app recevra 400 jusqu'à
     # configuration explicite dans la console.
     assert odd.return_hosts == []
-    assert done.return_hosts == ["x.foxugly.com"]
+    assert done.return_hosts == ["x.foxugly.invalid"]
