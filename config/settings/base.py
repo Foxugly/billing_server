@@ -2,6 +2,7 @@ from pathlib import Path
 
 import environ
 from celery.schedules import crontab
+from corsheaders.defaults import default_headers
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 env = environ.Env(DEBUG=(bool, False))
@@ -16,6 +17,21 @@ CORS_ALLOWED_ORIGINS = env.list(
     "CORS_ALLOWED_ORIGINS",
     default=["http://localhost:4200", "http://127.0.0.1:4200"],
 )
+# Refresh de la console en cookie HttpOnly (opt-in `X-Auth-Mode: cookie`,
+# accounts/refresh_cookie.py, design du pilote PushIT_server #69). Les
+# credentials ne sont admis QUE pour la liste explicite ci-dessus : jamais de
+# CORS_ALLOW_ALL_ORIGINS ni de joker (refusé au démarrage). L'API HMAC des apps
+# n'envoie ni Origin ni cookie : elle n'est pas concernée.
+CORS_ALLOW_HEADERS = (*default_headers, "x-auth-mode")
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = False
+if "*" in CORS_ALLOWED_ORIGINS:
+    raise ValueError("CORS_ALLOWED_ORIGINS doit lister des origines explicites (credentials admis).")
+# Host-only sur billing-api (pas de Domain), limité aux endpoints d'auth, SameSite=Lax
+# (billing.foxugly.com et billing-api.foxugly.com sont same-site).
+AUTH_REFRESH_COOKIE_NAME = env("AUTH_REFRESH_COOKIE_NAME", default="billing_refresh")
+AUTH_REFRESH_COOKIE_PATH = "/api/v1/auth/"
+AUTH_REFRESH_COOKIE_SECURE = env.bool("AUTH_REFRESH_COOKIE_SECURE", default=True)
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 
 # URL publique de la console Angular (lot L5) — sert aux redirections et aux liens.
