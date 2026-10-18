@@ -7,6 +7,7 @@ compte non-staff, plutôt que de délivrer un jeton qui ne servirait à rien —
 refus clair vaut mieux qu'un jeton inerte qu'on croira valide.
 """
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import update_last_login
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from drf_spectacular.utils import extend_schema
@@ -14,25 +15,50 @@ from rest_framework import generics, permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.serializers import (
+    TokenObtainPairSerializer,
+    TokenObtainSerializer,
+    TokenRefreshSerializer,
+)
+from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.token_blacklist.models import (
     BlacklistedToken,
     OutstandingToken,
 )
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import (
+    TokenBlacklistView,
+    TokenObtainPairView,
+    TokenRefreshView,
+)
+
+from . import refresh_cookie
+from .refresh_cookie import PERSIST_CLAIM, deliver_tokens
 
 User = get_user_model()
 
 
 class StaffTokenObtainPairSerializer(TokenObtainPairSerializer):
+    # « Se souvenir de moi » : en mode cookie, `false` donne un cookie de session
+    # (claim `persist=false`, conservé par la rotation). Sans effet en mode corps.
+    remember_me = serializers.BooleanField(required=False, default=True)
+
     def validate(self, attrs):
-        data = super().validate(attrs)
+        # Authentification seule (TokenObtainSerializer) : le refresh est émis
+        # ici, une seule fois, avec son claim `persist` éventuel.
+        TokenObtainSerializer.validate(self, attrs)
         if not self.user.is_staff:
             raise serializers.ValidationError(
                 {"detail": "Ce service est réservé aux opérateurs."}, code="not_staff"
             )
-        return data
+        refresh = self.get_token(self.user)
+        request = self.context.get("request")
+        if request is not None and refresh_cookie.wants_cookie(request) and not attrs["remember_me"]:
+            refresh[PERSIST_CLAIM] = False
+        if api_settings.UPDATE_LAST_LOGIN:
+            update_last_login(None, self.user)
+        return {"refresh": str(refresh), "access": str(refresh.access_token)}
 
 
 class LoginThrottle(AnonRateThrottle):
@@ -44,8 +70,73 @@ class LoginThrottle(AnonRateThrottle):
 
 
 class StaffTokenObtainPairView(TokenObtainPairView):
+    """Login. Avec `X-Auth-Mode: cookie`, le refresh part en cookie HttpOnly et
+    sort du corps ; l'Origin doit alors être autorisée (403 `origin_not_allowed`)."""
+
     serializer_class = StaffTokenObtainPairSerializer
     throttle_classes = [LoginThrottle]
+
+    def post(self, request, *args, **kwargs):
+        if (rejected := refresh_cookie.origin_guard(request)) is not None:
+            return rejected
+        return deliver_tokens(request, super().post(request, *args, **kwargs))
+
+
+def _token_from_body_or_cookie(request) -> str:
+    body_token = request.data.get("refresh") if hasattr(request.data, "get") else None
+    return body_token or refresh_cookie.read_refresh_cookie(request)
+
+
+class CookieTokenRefreshView(TokenRefreshView):
+    """Refresh + rotation. Mode corps : `{refresh}` -> `{access, refresh}`, inchangé.
+
+    Mode cookie : le `refresh` du corps est facultatif ; à défaut, le cookie
+    HttpOnly sert (401 `refresh_cookie_missing` s'il manque). Le jeton roté est
+    posé dans le cookie et retiré du corps. Un jeton présenté dans le corps avec
+    l'en-tête est la migration unique d'une console qui le gardait en localStorage.
+    """
+
+    def post(self, request, *args, **kwargs):
+        if not refresh_cookie.wants_cookie(request):
+            return super().post(request, *args, **kwargs)
+        if (rejected := refresh_cookie.origin_guard(request)) is not None:
+            return rejected
+        token = _token_from_body_or_cookie(request)
+        if not token:
+            return Response(
+                {"code": "refresh_cookie_missing", "detail": "Aucun cookie de session : reconnectez-vous."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        serializer = TokenRefreshSerializer(data={"refresh": token})
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as exc:
+            raise InvalidToken(exc.args[0]) from exc
+        return deliver_tokens(request, Response(serializer.validated_data, status=status.HTTP_200_OK))
+
+
+class CookieTokenBlacklistView(TokenBlacklistView):
+    """Logout. Mode corps : `{refresh}` -> 200, inchangé.
+
+    Mode cookie (aucun Bearer requis : l'accès en mémoire peut avoir expiré) : met
+    sur liste noire le jeton du corps, à défaut celui du cookie, **efface toujours
+    le cookie** et répond 204 — idempotent, le navigateur finit déconnecté.
+    """
+
+    def post(self, request, *args, **kwargs):
+        if not refresh_cookie.wants_cookie(request):
+            return super().post(request, *args, **kwargs)
+        if (rejected := refresh_cookie.origin_guard(request)) is not None:
+            return rejected
+        token = _token_from_body_or_cookie(request)
+        if token:
+            try:
+                RefreshToken(token).blacklist()
+            except TokenError:
+                pass  # déjà révoqué ou expiré : le but (déconnecté) est atteint
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        refresh_cookie.clear_refresh_cookie(response)
+        return response
 
 
 def revoke_all_refresh_tokens(user):
@@ -126,9 +217,11 @@ class PasswordChangeView(APIView):
     (refusé par les validateurs Django, messages dans `messages`).
 
     Succès : 200 `{access, refresh}`. Tous les refresh existants sont révoqués —
-    une session volée ne survit pas au changement — et la console stocke la
+    une session volée ne survit pas au changement — et la console garde la
     nouvelle paire, sans quoi l'opérateur serait éjecté à l'expiration de l'accès
-    (OPERATIONS.md §3.25).
+    (OPERATIONS.md §3.25). En mode cookie (`X-Auth-Mode: cookie`), le refresh neuf
+    est posé dans le cookie (même choix « se souvenir de moi » que la session
+    courante) et retiré du corps ; l'Origin doit être autorisée.
     """
 
     permission_classes = [permissions.IsAdminUser]
@@ -136,6 +229,8 @@ class PasswordChangeView(APIView):
 
     @extend_schema(request=PasswordChangeSerializer, responses={200: None, 400: None})
     def post(self, request):
+        if (rejected := refresh_cookie.origin_guard(request)) is not None:
+            return rejected
         serializer = PasswordChangeSerializer(data=request.data)
         if not serializer.is_valid():
             return _password_error("invalid", "Champs manquants.", fields=serializer.errors)
@@ -156,8 +251,21 @@ class PasswordChangeView(APIView):
                 "password_invalid", "Mot de passe refusé.", messages=list(exc.messages)
             )
 
+        persist = _cookie_session_persists(request)
         user.set_password(new)
         user.save(update_fields=["password"])
         revoke_all_refresh_tokens(user)
         refresh = RefreshToken.for_user(user)
-        return Response({"access": str(refresh.access_token), "refresh": str(refresh)})
+        if not persist:
+            refresh[PERSIST_CLAIM] = False
+        return deliver_tokens(
+            request, Response({"access": str(refresh.access_token), "refresh": str(refresh)})
+        )
+
+
+def _cookie_session_persists(request) -> bool:
+    """Reprend le choix « se souvenir de moi » de la session cookie courante."""
+    if not refresh_cookie.wants_cookie(request):
+        return True
+    current = refresh_cookie.read_refresh_cookie(request)
+    return refresh_cookie.token_persists(current) if current else True
