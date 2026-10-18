@@ -40,6 +40,7 @@ from .invoicing import (
     void_invoice,
 )
 from .models import App, AppCustomer, Entitlement, EntitlementDelivery, Plan
+from .pagination import paginated
 from .stripe_gateway import stripe_configured
 
 logger = logging.getLogger("billing")
@@ -126,7 +127,7 @@ class EventViewSet(viewsets.ViewSet):
             evenements = evenements.filter(type__icontains=motif)
         if request.query_params.get("handled") == "true":
             evenements = evenements.filter(type__in=SUBSCRIPTION_EVENTS)
-        return Response(EventSerializer(list(evenements), many=True).data)
+        return paginated(self, request, evenements, EventSerializer)
 
     @action(detail=True, methods=["post"])
     def replay(self, request, pk=None):
@@ -186,7 +187,7 @@ class PriceViewSet(viewsets.ViewSet):
         # Les prix archivés sont exclus : Stripe refuse de vendre dessus, les
         # proposer donnerait un plan invendable.
         prix = Price.objects.filter(active=True).select_related("product").order_by("id")
-        return Response(PriceSerializer(list(prix), many=True).data)
+        return paginated(self, request, prix, PriceSerializer)
 
 
 class CustomerViewSet(StaffViewSet):
@@ -363,7 +364,7 @@ class InvoiceViewSet(viewsets.ViewSet):
         origine = request.query_params.get("origin")
         if origine == "direct":
             factures = [f for f in factures if (f.metadata or {}).get("origin") == "direct"]
-        return Response(InvoiceSerializer(list(factures), many=True).data)
+        return paginated(self, request, factures, InvoiceSerializer)
 
     def create(self, request):
         if not stripe_configured():

@@ -54,7 +54,7 @@ def test_the_list_says_which_events_we_act_on(staff_client, app):
     _event("evt_1", "customer.subscription.updated", ABONNEMENT)
     _event("evt_2", "invoice.payment_succeeded", {})
 
-    lignes = staff_client.get("/api/v1/admin/events/").json()
+    lignes = staff_client.get("/api/v1/admin/events/").json()["results"]
     par_id = {e["id"]: e for e in lignes}
 
     assert par_id["evt_1"]["handled"] is True
@@ -72,7 +72,7 @@ def test_an_event_we_act_on_but_cannot_attribute_is_flagged(staff_client, app):
     C'est exactement le cas qu'un operateur doit pouvoir reperer."""
     _event("evt_3", "customer.subscription.updated", {"status": "active"})
 
-    ligne = staff_client.get("/api/v1/admin/events/").json()[0]
+    ligne = staff_client.get("/api/v1/admin/events/").json()["results"][0]
 
     assert ligne["handled"] is True
     assert ligne["app_slug"] == ""
@@ -87,7 +87,7 @@ def test_the_newest_event_comes_first(staff_client, app):
     _event("evt_recent", "customer.subscription.updated", ABONNEMENT,
            created=datetime(2026, 7, 29, tzinfo=tz.utc))
 
-    lignes = staff_client.get("/api/v1/admin/events/").json()
+    lignes = staff_client.get("/api/v1/admin/events/").json()["results"]
 
     assert [e["id"] for e in lignes] == ["evt_recent", "evt_vieux"]
 
@@ -97,7 +97,7 @@ def test_the_type_filter_narrows_the_list(staff_client, app):
     _event("evt_1", "customer.subscription.updated", ABONNEMENT)
     _event("evt_2", "invoice.payment_succeeded", {})
 
-    lignes = staff_client.get("/api/v1/admin/events/?type=subscription").json()
+    lignes = staff_client.get("/api/v1/admin/events/?type=subscription").json()["results"]
 
     assert [e["id"] for e in lignes] == ["evt_1"]
 
@@ -107,7 +107,7 @@ def test_only_the_events_we_act_on_can_be_kept(staff_client, app):
     _event("evt_1", "customer.subscription.updated", ABONNEMENT)
     _event("evt_2", "invoice.payment_succeeded", {})
 
-    lignes = staff_client.get("/api/v1/admin/events/?handled=true").json()
+    lignes = staff_client.get("/api/v1/admin/events/?handled=true").json()["results"]
 
     assert [e["id"] for e in lignes] == ["evt_1"]
 
