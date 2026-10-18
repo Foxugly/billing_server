@@ -28,31 +28,29 @@ def stripe_client():
     return stripe
 
 
+def return_hosts_of(app) -> set[str]:
+    """Les hôtes de retour déclarés par l'app, normalisés en minuscules."""
+    return {str(h).strip().lower() for h in (app.return_hosts or []) if str(h).strip()}
+
+
 def url_is_allowed_for(app, url: str) -> bool:
-    """Une URL de retour doit rester sur un domaine de l'application appelante.
+    """Une URL de retour doit viser un hôte déclaré par l'application appelante.
 
     Sans ce contrôle, une app compromise — ou un simple bug de concaténation —
     transformerait le service en redirecteur ouvert : Stripe renverrait le client
     payant vers un domaine arbitraire, avec toute la confiance visuelle du tunnel.
+
+    Correspondance **exacte** sur `App.return_hosts` (audit 2026-10-18, M2) :
+    l'ancienne règle du « même domaine parent » laissait poker renvoyer vers
+    pushit, vers la console billing ou vers un sous-domaine pendouillant.
     """
     if not url:
         return False
     parsed = urlparse(url)
     if parsed.scheme != "https":
         return False
-
-    allowed_hosts = {urlparse(app.base_url).hostname}
-    frontend = getattr(settings, "FRONTEND_BASE_URL", "")
-    if frontend:
-        allowed_hosts.add(urlparse(frontend).hostname)
-
-    host = parsed.hostname or ""
-    # Le SPA d'une app vit sur un sous-domaine frère de son API (poker.foxugly.com
-    # face à poker-api.foxugly.com) : on accepte le même domaine parent.
-    api_host = urlparse(app.base_url).hostname or ""
-    parent = api_host.split(".", 1)[1] if "." in api_host else api_host
-
-    return host in allowed_hosts or (parent and host.endswith("." + parent))
+    host = (parsed.hostname or "").lower()
+    return bool(host) and host in return_hosts_of(app)
 
 
 def trial_days_for(stripe, plan, stripe_customer_id: str, quantity: int, *, known_subscriber=False) -> int:

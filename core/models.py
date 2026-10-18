@@ -39,6 +39,15 @@ class App(models.Model):
             "car l'alias transitoire ne couvre pas les endpoints signés."
         ),
     )
+    return_hosts = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Hôtes vers lesquels Stripe peut renvoyer le client après checkout ou portail, "
+            'ex. ["poker.foxugly.com"]. Comparaison exacte, sans joker. Vide = checkout et '
+            "portail refusés (400) : une app ne peut renvoyer que vers ses propres pages."
+        ),
+    )
     shared_secret = models.CharField(max_length=100, default=generate_shared_secret)
     previous_shared_secret = models.CharField(
         max_length=100, blank=True, help_text="Accepté pendant 24 h après une rotation."

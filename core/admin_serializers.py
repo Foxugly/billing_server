@@ -17,7 +17,7 @@ class AppSerializer(serializers.ModelSerializer):
         model = App
         fields = (
             "id", "slug", "name", "base_url", "entitlement_path", "entitlement_url",
-            "active", "plans_count", "secret_rotated_at", "created_at",
+            "return_hosts", "active", "plans_count", "secret_rotated_at", "created_at",
         )
         # Le secret n'est JAMAIS exposé, même à un opérateur : la console n'en a
         # pas besoin (elle teste la connectivité côté serveur) et le faire
@@ -39,6 +39,30 @@ class AppSerializer(serializers.ModelSerializer):
                 f"URL https:// attendue, sur un hôte se terminant par {' ou '.join(suffixes)}."
             )
         return value
+
+    def validate_return_hosts(self, value):
+        """Des noms d'hôte nus de la flotte : ni schéma, ni chemin, ni port, ni
+        joker. Un joker rouvrirait exactement ce que l'audit M2 a fermé."""
+        import re
+
+        from django.conf import settings
+
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Liste de noms d'hôte attendue.")
+        suffixes = tuple(settings.BILLING_APP_HOST_SUFFIXES)
+        label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+        pattern = re.compile(rf"^{label}(?:\.{label})+$")
+        hosts = []
+        for raw in value:
+            host = str(raw or "").strip().lower()
+            if not pattern.match(host) or not host.endswith(suffixes):
+                raise serializers.ValidationError(
+                    f"« {raw} » : nom d'hôte nu attendu (sans https:// ni chemin), "
+                    f"se terminant par {' ou '.join(suffixes)}."
+                )
+            if host not in hosts:
+                hosts.append(host)
+        return hosts
 
 
 class PlanSerializer(serializers.ModelSerializer):

@@ -26,6 +26,7 @@ from .stripe_gateway import (
     preview_quantity_change,
     stripe_client,
     stripe_configured,
+    return_hosts_of,
     trial_days_for,
     url_is_allowed_for,
 )
@@ -47,6 +48,23 @@ def stripe_failed(exc, where):
     """Une erreur Stripe n'est pas une erreur du serveur : 502, et une trace."""
     logger.warning("stripe_error", extra={"where": where, "error": type(exc).__name__})
     return error("stripe_error", "Stripe a refusé ou n'a pas répondu.", status.HTTP_502_BAD_GATEWAY)
+
+
+def return_urls_refused(app, *urls):
+    """Réponse 400 si une URL de retour n'est pas autorisée pour l'app, sinon None.
+
+    Une app sans hôte déclaré est refusée avec un code distinct : c'est un
+    réglage manquant côté console, pas une URL fautive côté app.
+    """
+    if not return_hosts_of(app):
+        return error(
+            "return_hosts_unconfigured",
+            "Aucun hôte de retour n'est déclaré pour cette app (console billing → Apps).",
+            status.HTTP_400_BAD_REQUEST,
+        )
+    if not all(url_is_allowed_for(app, url) for url in urls):
+        return error("bad_return_url", "URL de retour hors des hôtes déclarés pour l'app.", status.HTTP_400_BAD_REQUEST)
+    return None
 
 
 def user_id_from(data):
@@ -210,8 +228,8 @@ class CheckoutView(SignedServiceView):
         if price is None:
             return error("unknown_interval", "Aucun prix pour cet intervalle.", status.HTTP_400_BAD_REQUEST)
 
-        if not (url_is_allowed_for(app, success_url) and url_is_allowed_for(app, cancel_url)):
-            return error("bad_return_url", "URL de retour hors du domaine de l'app.", status.HTTP_400_BAD_REQUEST)
+        if (refus := return_urls_refused(app, success_url, cancel_url)) is not None:
+            return refus
 
         customer = AppCustomer.objects.filter(app=app, external_user_id=external_user_id).first()
         if customer is None:
@@ -309,8 +327,8 @@ class PortalView(SignedServiceView):
         external_user_id = str(request.data.get("external_user_id") or "")
         return_url = request.data.get("return_url") or ""
 
-        if not url_is_allowed_for(app, return_url):
-            return error("bad_return_url", "URL de retour hors du domaine de l'app.", status.HTTP_400_BAD_REQUEST)
+        if (refus := return_urls_refused(app, return_url)) is not None:
+            return refus
 
         entitlement = Entitlement.objects.filter(app=app, external_user_id=external_user_id).first()
         customer_id = entitlement.stripe_customer_id if entitlement else ""
