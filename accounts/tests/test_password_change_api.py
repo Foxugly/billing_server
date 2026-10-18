@@ -48,7 +48,8 @@ def test_closed_to_a_non_staff_user(django_user_model):
 def test_changes_the_password(api, operateur):
     response = api.post(URL, {"current_password": CURRENT, "new_password": NEW}, format="json")
 
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert response.json()["access"] and response.json()["refresh"]
     operateur.refresh_from_db()
     assert operateur.check_password(NEW)
 

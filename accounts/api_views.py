@@ -11,10 +11,12 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.response import Response
-from rest_framework.throttling import UserRateThrottle
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 User = get_user_model()
@@ -30,8 +32,23 @@ class StaffTokenObtainPairSerializer(TokenObtainPairSerializer):
         return data
 
 
+class LoginThrottle(AnonRateThrottle):
+    """Ce compte pilote Stripe en live : pas de devinette de mot de passe à la
+    chaîne (audit 2026-10-18, I1). Par IP, derrière nginx (NUM_PROXIES = 1)."""
+
+    scope = "auth_token"
+    rate = "5/min"
+
+
 class StaffTokenObtainPairView(TokenObtainPairView):
     serializer_class = StaffTokenObtainPairSerializer
+    throttle_classes = [LoginThrottle]
+
+
+def revoke_all_refresh_tokens(user):
+    """Met sur liste noire tous les refresh encore valides de cet utilisateur."""
+    for token in OutstandingToken.objects.filter(user=user):
+        BlacklistedToken.objects.get_or_create(token=token)
 
 
 class MeSerializer(serializers.ModelSerializer):
@@ -103,14 +120,18 @@ class PasswordChangeView(APIView):
     Corps : {current_password, new_password}. Les erreurs portent un `code`
     stable que la console traduit : `invalid` (champ manquant),
     `current_password_invalid`, `password_unchanged`, `password_invalid`
-    (refusé par les validateurs Django, messages dans `messages`). Aucun jeton
-    n'est réémis : l'accès en cours reste valable jusqu'à son expiration.
+    (refusé par les validateurs Django, messages dans `messages`).
+
+    Succès : 200 `{access, refresh}`. Tous les refresh existants sont révoqués —
+    une session volée ne survit pas au changement — et la console stocke la
+    nouvelle paire, sans quoi l'opérateur serait éjecté à l'expiration de l'accès
+    (OPERATIONS.md §3.25).
     """
 
     permission_classes = [permissions.IsAdminUser]
     throttle_classes = [PasswordChangeThrottle]
 
-    @extend_schema(request=PasswordChangeSerializer, responses={204: None, 400: None})
+    @extend_schema(request=PasswordChangeSerializer, responses={200: None, 400: None})
     def post(self, request):
         serializer = PasswordChangeSerializer(data=request.data)
         if not serializer.is_valid():
@@ -134,4 +155,6 @@ class PasswordChangeView(APIView):
 
         user.set_password(new)
         user.save(update_fields=["password"])
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        revoke_all_refresh_tokens(user)
+        refresh = RefreshToken.for_user(user)
+        return Response({"access": str(refresh.access_token), "refresh": str(refresh)})

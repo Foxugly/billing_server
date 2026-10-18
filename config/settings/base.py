@@ -123,11 +123,15 @@ STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", default=False)
 # migration entre les deux : le choix se fait maintenant ou jamais.
 DJSTRIPE_FOREIGN_KEY_TO_FIELD = "id"
 
+# Hôtes admis pour le `base_url` d'une app : ping et livraisons y POSTent un corps
+# signé (audit M6). Les tests ajoutent `.foxugly.invalid` (config/settings/test.py).
+BILLING_APP_HOST_SUFFIXES = env.list("BILLING_APP_HOST_SUFFIXES", default=[".foxugly.com"])
+
 # Jours de grâce accordés après un échec de paiement avant de fermer l'accès (§6.6).
 # 0 désactive la grâce. Réglable en SSM sans redéploiement.
 BILLING_GRACE_DAYS = env.int("BILLING_GRACE_DAYS", default=7)
 
-# --- Redis : broker Celery (db4) et cache Django (db5) ---------------------------
+# --- Redis : broker Celery (db4) et cache Django (db10) ---------------------------
 # db0 à db3 sont déjà pris sur la box (dont db3 par les Channels de Poker).
 REDIS_URL = env("REDIS_URL", default="")
 CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=REDIS_URL or "memory://")
@@ -153,11 +157,14 @@ CELERY_BEAT_SCHEDULE = {
 # entre les workers gunicorn. Avec LocMem (par processus), un rejeu passerait une
 # fois par worker — la protection serait cosmétique. En dev/test, sans Redis, on
 # retombe sur LocMem : mono-processus, donc correct.
-if REDIS_URL:
+# db 9 et non plus db 5, qui appartient à fabric (OPERATIONS.md §3.4, audit M3).
+# `CACHE_URL` en SSM l'emporte, pour pouvoir déplacer le cache sans redéployer.
+CACHE_URL = env("CACHE_URL", default="")
+if REDIS_URL or CACHE_URL:
     CACHES = {
         "default": {
             "BACKEND": "django.core.cache.backends.redis.RedisCache",
-            "LOCATION": REDIS_URL.rsplit("/", 1)[0] + "/5",
+            "LOCATION": CACHE_URL or REDIS_URL.rsplit("/", 1)[0] + "/10",
         }
     }
 else:
@@ -169,6 +176,19 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # nginx est le seul proxy devant gunicorn : l'identité d'un client anonyme est
+    # la DERNIÈRE entrée de X-Forwarded-For. Sans ça, un XFF inventé contourne
+    # toute limite de débit anonyme (OPERATIONS.md §3.25).
+    "NUM_PROXIES": 1,
+}
+
+# Rotation + liste noire : un refresh ne sert qu'une fois, le logout et le
+# changement de mot de passe peuvent révoquer (audit 2026-10-18, I2). Ce compte
+# pilote Stripe en live : une session volée ne doit pas survivre à un changement
+# de mot de passe.
+SIMPLE_JWT = {
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 SPECTACULAR_SETTINGS = {
@@ -193,6 +213,8 @@ if STATE == "PROD" and SENTRY_DSN:
         environment=env("SENTRY_ENVIRONMENT", default="production"),
         traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0),
         send_default_pii=False,
+        # Le corps d'un checkout porte l'e-mail du client : jamais dans Sentry (M4).
+        max_request_body_size="never",
         # Étiquette la commande de gestion, et tait le `shell` : une faute de
         # frappe dans une session d'audit n'est pas une erreur de production.
         before_send=sentry_before_send,

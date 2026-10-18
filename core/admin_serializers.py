@@ -24,6 +24,22 @@ class AppSerializer(serializers.ModelSerializer):
         # transiter dans un bundle SPA le mettrait dans un cache navigateur.
         read_only_fields = ("secret_rotated_at", "created_at")
 
+    def validate_base_url(self, value):
+        """`ping` et les livraisons POSTent un corps signé vers cette URL : un
+        hôte HTTPS de la flotte, jamais 127.0.0.1 ni un tiers (audit M6)."""
+        from urllib.parse import urlparse
+
+        from django.conf import settings
+
+        parsed = urlparse(value)
+        host = (parsed.hostname or "").lower()
+        suffixes = tuple(settings.BILLING_APP_HOST_SUFFIXES)
+        if parsed.scheme != "https" or not host.endswith(suffixes):
+            raise serializers.ValidationError(
+                f"URL https:// attendue, sur un hôte se terminant par {' ou '.join(suffixes)}."
+            )
+        return value
+
 
 class PlanSerializer(serializers.ModelSerializer):
     app_slug = serializers.CharField(source="app.slug", read_only=True)

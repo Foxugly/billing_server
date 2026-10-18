@@ -204,10 +204,11 @@ class CustomerViewSet(StaffViewSet):
         return queryset
 
 
-class EntitlementViewSet(StaffViewSet):
+class EntitlementViewSet(viewsets.ReadOnlyModelViewSet):
+    # Lecture seule + actions : un POST sur la racine ouvrait `create` (M7).
+    permission_classes = [permissions.IsAdminUser]
     queryset = Entitlement.objects.select_related("app")
     serializer_class = EntitlementSerializer
-    http_method_names = ["get", "head", "options", "post"]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -244,10 +245,10 @@ class EntitlementViewSet(StaffViewSet):
         return Response(EntitlementSerializer(entitlement).data)
 
 
-class DeliveryViewSet(StaffViewSet):
+class DeliveryViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [permissions.IsAdminUser]
     queryset = EntitlementDelivery.objects.select_related("entitlement__app")
     serializer_class = EntitlementDeliverySerializer
-    http_method_names = ["get", "head", "options", "post"]
 
     def get_queryset(self):
         queryset = super().get_queryset()

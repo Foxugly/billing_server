@@ -153,6 +153,7 @@ jobs:
             "git -C $APP show origin/main:deploy/fetch-env-from-ssm.sh > /usr/local/sbin/billing-env-fetch.sh",
             "chown root:root /usr/local/sbin/billing-env-fetch.sh && chmod 0755 /usr/local/sbin/billing-env-fetch.sh",
             "for u in billing-env-fetch billing-gunicorn billing-celery billing-celery-beat; do git -C $APP show origin/main:deploy/systemd/$u.service > /etc/systemd/system/$u.service; done",
+            "git -C $APP show origin/main:deploy/nginx/billing-limits.conf > /etc/nginx/conf.d/billing-limits.conf",
             "git -C $APP show origin/main:deploy/nginx/billing-api.conf > /etc/nginx/sites-available/billing-api.conf",
             "ln -sf ../sites-available/billing-api.conf /etc/nginx/sites-enabled/billing-api.conf",
             "systemctl daemon-reload",

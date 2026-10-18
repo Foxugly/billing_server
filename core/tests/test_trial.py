@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.models import AppCustomer, Plan
+from core.models import Plan
 from core.stripe_gateway import trial_days_for
 
 
@@ -36,45 +36,84 @@ def _stripe(avec_anterieurs=False, echoue=False):
 @pytest.mark.django_db
 def test_a_brand_new_customer_gets_the_trial(app, plan_essai):
     """Aucun client Stripe encore : c'est forcément un premier abonnement."""
-    assert trial_days_for(_stripe(), plan_essai, None, 1) == 30
+    assert trial_days_for(_stripe(), plan_essai, "", 1) == 30
 
 
 @pytest.mark.django_db
 def test_a_customer_without_any_past_subscription_gets_the_trial(app, plan_essai):
-    client = AppCustomer.objects.create(app=app, external_user_id="42", email="a@example.com")
-
-    assert trial_days_for(_stripe(avec_anterieurs=False), plan_essai, client, 1) == 30
+    assert trial_days_for(_stripe(avec_anterieurs=False), plan_essai, "cus_123", 1) == 30
 
 
 @pytest.mark.django_db
 def test_a_customer_who_already_subscribed_gets_no_trial(app, plan_essai):
     """Sinon il suffirait de résilier puis se réabonner pour être gratuit à vie."""
-    client = AppCustomer.objects.create(app=app, external_user_id="42", email="a@example.com")
-    client.customer_id = "cus_123"
+    stripe = _stripe(avec_anterieurs=True)
 
-    assert trial_days_for(_stripe(avec_anterieurs=True), plan_essai, client, 1) == 0
+    assert trial_days_for(stripe, plan_essai, "cus_123", 1) == 0
+    # L'identifiant interroge est bien le `cus_…`, pas un entier interne (audit I3).
+    assert stripe.Subscription.list.call_args.kwargs["customer"] == "cus_123"
 
 
 @pytest.mark.django_db
 def test_no_trial_beyond_a_single_unit(app, plan_essai):
     """Sinon on offrirait cinquante applications pendant un mois."""
-    assert trial_days_for(_stripe(), plan_essai, None, 2) == 0
-    assert trial_days_for(_stripe(), plan_essai, None, 50) == 0
+    assert trial_days_for(_stripe(), plan_essai, "", 2) == 0
+    assert trial_days_for(_stripe(), plan_essai, "", 50) == 0
 
 
 @pytest.mark.django_db
 def test_a_plan_without_trial_never_grants_one(app, plan_sans_essai):
-    assert trial_days_for(_stripe(), plan_sans_essai, None, 1) == 0
+    assert trial_days_for(_stripe(), plan_sans_essai, "", 1) == 0
 
 
 @pytest.mark.django_db
 def test_when_stripe_cannot_be_reached_no_trial_is_granted(app, plan_essai):
     """En cas de doute on refuse : un essai refusé à tort se rattrape à la main,
     un essai offert en boucle ne se rattrape pas."""
-    client = AppCustomer.objects.create(app=app, external_user_id="42", email="a@example.com")
-    client.customer_id = "cus_123"
+    assert trial_days_for(_stripe(echoue=True), plan_essai, "cus_123", 1) == 0
 
-    assert trial_days_for(_stripe(echoue=True), plan_essai, client, 1) == 0
+
+@pytest.mark.django_db
+def test_a_known_former_subscriber_gets_no_trial_even_without_stripe(app, plan_essai):
+    """Le miroir local suffit à refuser : pas besoin de Stripe pour savoir qu'il a déjà payé."""
+    stripe = _stripe()
+
+    assert trial_days_for(stripe, plan_essai, "", 1, known_subscriber=True) == 0
+    stripe.Subscription.list.assert_not_called()
+
+
+@pytest.mark.django_db
+def test_checkout_refuses_a_second_trial_to_a_former_subscriber(app, signed_post, settings):
+    """Bout en bout, avec le vrai `trial_days_for` : ancien abonné résilié → 0 jour."""
+    from unittest.mock import patch
+
+    from core.models import Entitlement
+
+    settings.STRIPE_TEST_SECRET_KEY = "sk_test_factice"
+    Plan.objects.create(app=app, code="app", name="Par app", per_unit_quota_key="applications", trial_days=30)
+    Entitlement.objects.create(
+        app=app, external_user_id="42", status="canceled", stripe_customer_id="cus_old",
+        stripe_subscription_id="sub_old",
+    )
+    stripe = MagicMock()
+    stripe.Subscription.list.return_value = {"data": [{"id": "sub_old", "status": "canceled"}]}
+    stripe.checkout.Session.create.return_value = MagicMock(url="https://checkout.stripe.com/c/x")
+
+    with patch.object(Plan, "price_for", return_value=MagicMock(id="price_unit")), patch(
+        "core.api_views.stripe_client", return_value=stripe
+    ):
+        response = signed_post(
+            "/api/v1/checkout/",
+            {"external_user_id": "42", "plan": "app", "interval": "monthly",
+             "success_url": "https://poker.foxugly.invalid/ok",
+             "cancel_url": "https://poker.foxugly.invalid/ko"},
+            app,
+        )
+
+    assert response.status_code == 200
+    params = stripe.checkout.Session.create.call_args.kwargs
+    assert "trial_period_days" not in params["subscription_data"]
+    assert params["customer"] == "cus_old"
 
 
 @pytest.mark.django_db
@@ -147,7 +186,7 @@ def test_the_quantity_is_locked_during_a_trial(app, signed_post, settings):
         )
 
     params = stripe.checkout.Session.create.call_args.kwargs
-    assert params["subscription_data"] == {"trial_period_days": 30}
+    assert params["subscription_data"]["trial_period_days"] == 30
     assert "adjustable_quantity" not in params["line_items"][0]
     assert params["line_items"][0]["quantity"] == 1
 

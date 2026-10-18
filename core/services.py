@@ -14,6 +14,9 @@ from .models import Entitlement
 PAID_STATUSES = {"active", "trialing"}
 # Statuts qui ferment l'accès immédiatement, même si une grâce est en cours.
 TERMINAL_STATUSES = {"canceled", "unpaid", "incomplete_expired"}
+# Statuts définitifs chez Stripe : un abonnement qui y est entré n'en sort plus.
+# (`unpaid` n'en fait pas partie : un paiement le fait revenir à `active`.)
+ENDED_STATUSES = {"canceled", "incomplete_expired"}
 
 
 def period_end_of(subscription):
@@ -50,6 +53,8 @@ def recompute_entitlement(
     period_end=None,
     stripe_customer_id="",
     quantity=1,
+    stripe_subscription_id="",
+    event_created=None,
 ):
     """Recalcule et persiste le droit d'un utilisateur. Renvoie l'Entitlement.
 
@@ -87,6 +92,10 @@ def recompute_entitlement(
     # et on perdrait le lien vers le portail client.
     if stripe_customer_id:
         ent.stripe_customer_id = stripe_customer_id
+    if stripe_subscription_id:
+        ent.stripe_subscription_id = stripe_subscription_id
+    if event_created and (ent.last_event_at is None or event_created > ent.last_event_at):
+        ent.last_event_at = event_created
     ent.source = Entitlement.STRIPE
     ent.save()
     return ent

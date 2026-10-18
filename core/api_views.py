@@ -13,8 +13,10 @@ from djstripe.models import Customer as DjstripeCustomer
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from stripe import StripeError
 
-from .models import AppCustomer, Entitlement, Plan
+from .erasure import BillingUnconfigured, cancel_subscriptions, customer_ids_for, erase_user
+from .models import AppCustomer, Entitlement, ErasedUser, Plan
 from .permissions import HasValidAppSignature
 from .services import period_end_of, recompute_entitlement
 from .webhooks import plan_for_price, price_id_of, quantity_of
@@ -33,10 +35,39 @@ logger = logging.getLogger("billing")
 # Borne haute de l'ajustement en ligne. Au-dela, un forfait illimite revient
 # moins cher : c'est a l'application de l'y orienter, pas au tunnel de paiement.
 MAX_UNITS_PER_CHECKOUT = 20
+# Longueur de `external_user_id` dans nos modèles (CharField(100)).
+MAX_USER_ID_LENGTH = 100
 
 
 def error(code, detail, http_status):
     return Response({"code": code, "detail": detail}, status=http_status)
+
+
+def stripe_failed(exc, where):
+    """Une erreur Stripe n'est pas une erreur du serveur : 502, et une trace."""
+    logger.warning("stripe_error", extra={"where": where, "error": type(exc).__name__})
+    return error("stripe_error", "Stripe a refusé ou n'a pas répondu.", status.HTTP_502_BAD_GATEWAY)
+
+
+def user_id_from(data):
+    """`external_user_id` validé, ou None s'il est absent ou trop long."""
+    value = str(data.get("external_user_id") or "")
+    if not value or len(value) > MAX_USER_ID_LENGTH:
+        return None
+    return value
+
+
+def parse_quantity(raw):
+    """Entier 1..MAX_UNITS_PER_CHECKOUT, ou None. Refuse `1.5`, `True`, `"abc"`."""
+    if raw is None or raw == "":
+        return 1
+    if isinstance(raw, (bool, float)):
+        return None
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if 1 <= value <= MAX_UNITS_PER_CHECKOUT else None
 
 
 class SignedServiceView(APIView):
@@ -150,16 +181,26 @@ class CheckoutView(SignedServiceView):
             return error("billing_unconfigured", "Stripe n'est pas configuré.", status.HTTP_503_SERVICE_UNAVAILABLE)
 
         data = request.data
-        external_user_id = str(data.get("external_user_id") or "")
+        external_user_id = user_id_from(data)
         email = data.get("email") or ""
         plan_code = data.get("plan")
         interval = data.get("interval")
-        quantity = data.get("quantity") or 1
+        quantity = parse_quantity(data.get("quantity"))
         success_url = data.get("success_url") or ""
         cancel_url = data.get("cancel_url") or ""
 
         if not external_user_id:
-            return error("missing_user", "external_user_id est requis.", status.HTTP_400_BAD_REQUEST)
+            return error(
+                "missing_user",
+                f"external_user_id est requis ({MAX_USER_ID_LENGTH} caractères au plus).",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if quantity is None:
+            return error(
+                "bad_quantity",
+                f"quantity doit être un entier compris entre 1 et {MAX_UNITS_PER_CHECKOUT}.",
+                status.HTTP_400_BAD_REQUEST,
+            )
 
         plan = Plan.objects.filter(app=app, code=plan_code, active=True).first()
         if plan is None:
@@ -178,18 +219,22 @@ class CheckoutView(SignedServiceView):
         elif email and customer.email != email:
             customer.email = email
             customer.save(update_fields=["email"])
+        # Un identifiant effacé puis réutilisé par l'app désigne un nouvel
+        # utilisateur : ses webhooks ne doivent pas être ignorés.
+        ErasedUser.lift(app, external_user_id)
 
+        identity = {"app": app.slug, "external_user_id": external_user_id, "plan": plan.code}
         params = {
             "mode": "subscription",
             # La quantite fixe le quota pour un plan facture a l'unite.
-            "line_items": [{"price": price.id, "quantity": max(1, int(quantity))}],
+            "line_items": [{"price": price.id, "quantity": quantity}],
             "client_reference_id": f"{app.slug}:{external_user_id}",
-            "metadata": {
-                "app": app.slug,
-                "external_user_id": external_user_id,
-                "plan": plan.code,
-                "quantity": str(max(1, int(quantity))),
-            },
+            "metadata": {**identity, "quantity": str(quantity)},
+            # Stripe ne recopie PAS les metadata de la session sur l'abonnement,
+            # et un objet Subscription n'a pas de client_reference_id : sans
+            # ceci, les webhooks `customer.subscription.*` ne savaient pas de
+            # qui ils parlaient (audit 2026-10-18, B2).
+            "subscription_data": {"metadata": dict(identity)},
             "success_url": success_url,
             "cancel_url": cancel_url,
             # TVA : Stripe calcule et collecte selon l'adresse, gère l'OSS et le
@@ -198,9 +243,18 @@ class CheckoutView(SignedServiceView):
             "customer_update": {"address": "auto"},
             "tax_id_collection": {"enabled": True},
         }
-        essai = trial_days_for(stripe, plan, customer, quantity)
+        customer_id = known_stripe_customer_id(app, external_user_id)
+        # Un droit déjà alimenté par un abonnement Stripe = pas de second essai.
+        known_subscriber = (
+            Entitlement.objects.filter(
+                app=app, external_user_id=external_user_id, source=Entitlement.STRIPE
+            )
+            .exclude(status="", stripe_subscription_id="")
+            .exists()
+        )
+        essai = trial_days_for(stripe, plan, customer_id, quantity, known_subscriber=known_subscriber)
         if essai:
-            params["subscription_data"] = {"trial_period_days": essai}
+            params["subscription_data"]["trial_period_days"] = essai
         elif plan.per_unit_quota_key:
             # Le client ajuste lui-meme le nombre d'exemplaires sur la page Stripe.
             # JAMAIS pendant un essai : l'essai n'est accorde que pour une quantite
@@ -212,7 +266,6 @@ class CheckoutView(SignedServiceView):
                 "maximum": MAX_UNITS_PER_CHECKOUT,
             }
 
-        customer_id = known_stripe_customer_id(app, external_user_id)
         if customer_id:
             # Un client deja abonne qui repasse par Checkout obtiendrait un
             # SECOND abonnement Stripe : deux prelevements, et un droit qui
@@ -220,7 +273,11 @@ class CheckoutView(SignedServiceView):
             # que dans chaque front, parce que c'est la seule frontiere que
             # toutes les apps traversent -- y compris celles qui n'existent pas
             # encore. Changer de formule passe par le portail.
-            if active_subscription_for(stripe, customer_id) is not None:
+            try:
+                active = active_subscription_for(stripe, customer_id)
+            except StripeError as exc:
+                return stripe_failed(exc, "checkout")
+            if active is not None:
                 return error(
                     "already_subscribed",
                     "Un abonnement est deja en cours pour ce compte.",
@@ -233,7 +290,10 @@ class CheckoutView(SignedServiceView):
         elif email:
             params["customer_email"] = email
 
-        session = stripe.checkout.Session.create(**params)
+        try:
+            session = stripe.checkout.Session.create(**params)
+        except StripeError as exc:
+            return stripe_failed(exc, "checkout")
         return Response({"url": session.url})
 
 
@@ -257,7 +317,10 @@ class PortalView(SignedServiceView):
         if not customer_id:
             return error("no_customer", "Aucun abonnement à gérer.", status.HTTP_400_BAD_REQUEST)
 
-        session = stripe.billing_portal.Session.create(customer=customer_id, return_url=return_url)
+        try:
+            session = stripe.billing_portal.Session.create(customer=customer_id, return_url=return_url)
+        except StripeError as exc:
+            return stripe_failed(exc, "portal")
         return Response({"url": session.url})
 
 
@@ -360,14 +423,17 @@ class QuantityView(SignedServiceView):
 
         entitlement = Entitlement.objects.filter(app=app, external_user_id=external_user_id).first()
         customer_id = entitlement.stripe_customer_id if entitlement else ""
-        subscription = active_subscription_for(stripe, customer_id)
-        if subscription is None:
-            return error("no_subscription", "Aucun abonnement à modifier.", status.HTTP_400_BAD_REQUEST)
+        try:
+            subscription = active_subscription_for(stripe, customer_id)
+            if subscription is None:
+                return error("no_subscription", "Aucun abonnement à modifier.", status.HTTP_400_BAD_REQUEST)
 
-        if action == "preview":
-            return Response(preview_quantity_change(stripe, subscription, quantity))
+            if action == "preview":
+                return Response(preview_quantity_change(stripe, subscription, quantity))
 
-        apply_quantity_change(stripe, subscription, quantity)
+            apply_quantity_change(stripe, subscription, quantity)
+        except StripeError as exc:
+            return stripe_failed(exc, "quantity")
         # Le webhook customer.subscription.updated recalculera et poussera le droit ;
         # on ne duplique pas ce calcul ici pour éviter deux vérités concurrentes.
         logger.info(
@@ -375,3 +441,67 @@ class QuantityView(SignedServiceView):
             extra={"app": app.slug, "user": external_user_id, "quantity": quantity},
         )
         return Response({"quantity": quantity, "status": "applied"})
+
+
+class CancelSubscriptionsView(SignedServiceView):
+    """POST /api/v1/subscriptions/cancel/ — résilie les abonnements d'un utilisateur.
+
+    Corps : `{"external_user_id": "42", "at_period_end": false}`.
+    - `at_period_end=false` (défaut) : résiliation immédiate, sans remboursement
+      ni prorata (cf. `core/erasure.py`) ;
+    - `at_period_end=true` : l'accès court jusqu'à la fin de la période payée.
+
+    200 `{"canceled": [...], "at_period_end": bool}` ; 204 s'il n'y avait rien à
+    résilier. Le droit est mis à jour par le webhook qui suit, comme d'habitude.
+    """
+
+    def post(self, request):
+        app = request.billing_app
+        external_user_id = user_id_from(request.data)
+        if not external_user_id:
+            return error("missing_user", "external_user_id est requis.", status.HTTP_400_BAD_REQUEST)
+        at_period_end = request.data.get("at_period_end", False)
+        if not isinstance(at_period_end, bool):
+            return error("bad_at_period_end", "at_period_end doit être un booléen.", status.HTTP_400_BAD_REQUEST)
+
+        customer_ids = customer_ids_for(app, external_user_id)
+        if not customer_ids:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        stripe = stripe_client()
+        if stripe is None:
+            return error("billing_unconfigured", "Stripe n'est pas configuré.", status.HTTP_503_SERVICE_UNAVAILABLE)
+        try:
+            canceled = cancel_subscriptions(
+                stripe, app, external_user_id, at_period_end=at_period_end, customer_ids=customer_ids
+            )
+        except StripeError as exc:
+            return stripe_failed(exc, "cancel")
+        if not canceled:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response({"canceled": canceled, "at_period_end": at_period_end})
+
+
+class EraseUserView(SignedServiceView):
+    """POST /api/v1/erase/ — à appeler quand un utilisateur supprime son compte.
+
+    Corps : `{"external_user_id": "42"}`. Résilie immédiatement (sans
+    remboursement), supprime le client Stripe, pseudonymise l'`AppCustomer` et
+    efface le droit et ses livraisons. Idempotent : 200 avec un résumé quand il y
+    avait quelque chose à faire, 204 sinon. 502 si Stripe échoue (rien n'est
+    effacé localement : rappeler), 503 si Stripe n'est pas configuré.
+    """
+
+    def post(self, request):
+        app = request.billing_app
+        external_user_id = user_id_from(request.data)
+        if not external_user_id:
+            return error("missing_user", "external_user_id est requis.", status.HTTP_400_BAD_REQUEST)
+        try:
+            result = erase_user(stripe_client(), app, external_user_id)
+        except BillingUnconfigured:
+            return error("billing_unconfigured", "Stripe n'est pas configuré.", status.HTTP_503_SERVICE_UNAVAILABLE)
+        except StripeError as exc:
+            return stripe_failed(exc, "erase")
+        if result is None:
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(result)
