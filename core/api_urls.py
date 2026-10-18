@@ -1,7 +1,9 @@
 from django.urls import path
 
 from .api_views import (
+    CancelSubscriptionsView,
     CheckoutView,
+    EraseUserView,
     EntitlementView,
     HistoryView,
     PingView,
@@ -21,6 +23,9 @@ urlpatterns = [
     path("history/", HistoryView.as_view(), name="history"),
     path("quantity/preview/", QuantityView.as_view(), {"action": "preview"}, name="quantity-preview"),
     path("quantity/", QuantityView.as_view(), name="quantity"),
+    # Suppression de compte côté app (audit 2026-10-18, B1).
+    path("subscriptions/cancel/", CancelSubscriptionsView.as_view(), name="subscriptions-cancel"),
+    path("erase/", EraseUserView.as_view(), name="erase"),
     path(
         "entitlements/<slug:app_slug>/<str:external_user_id>/",
         EntitlementView.as_view(),

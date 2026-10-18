@@ -9,9 +9,12 @@ elles le lisent, elles ne l'écrivent jamais. Un tarif engage l'entreprise, et u
 prix Stripe est immuable — ce n'est pas une donnée qu'on modifie depuis sept bases
 de code différentes.
 """
+import hashlib
+import hmac
 import secrets
 import uuid
 
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
@@ -189,6 +192,17 @@ class Entitlement(models.Model):
         null=True, blank=True, help_text="Fin de la période de grâce après un échec de paiement (§6.6)"
     )
     stripe_customer_id = models.CharField(max_length=64, blank=True)
+    stripe_subscription_id = models.CharField(
+        max_length=64, blank=True, help_text="Abonnement Stripe dont provient l'état courant."
+    )
+    last_event_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Horodatage Stripe (`event.created`) du dernier événement appliqué. Un événement "
+            "plus ancien est ignoré : Stripe ne garantit pas l'ordre de livraison."
+        ),
+    )
     source = models.CharField(max_length=16, choices=SOURCES, default=STRIPE)
     computed_at = models.DateTimeField(auto_now=True)
 
@@ -245,3 +259,39 @@ class EntitlementDelivery(models.Model):
 
     def __str__(self):
         return f"{self.id} {self.status}"
+
+
+class ErasedUser(models.Model):
+    """Trace qu'un utilisateur d'une app a été effacé (RGPD art. 17).
+
+    Ne contient pas l'identifiant, seulement son HMAC : de quoi reconnaître un
+    webhook tardif (la résiliation provoquée par l'effacement arrive APRÈS) sans
+    conserver la donnée effacée. Sans cette trace, ce webhook recréerait un droit
+    et pousserait une livraison vers un compte qui n'existe plus.
+    """
+
+    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="erased_users")
+    user_hash = models.CharField(max_length=64)
+    erased_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=("app", "user_hash"), name="unique_erased_user_per_app")
+        ]
+
+    @staticmethod
+    def hash_of(app, external_user_id) -> str:
+        message = f"{app.slug}:{external_user_id}".encode()
+        return hmac.new(settings.SECRET_KEY.encode(), message, hashlib.sha256).hexdigest()
+
+    @classmethod
+    def mark(cls, app, external_user_id):
+        cls.objects.get_or_create(app=app, user_hash=cls.hash_of(app, external_user_id))
+
+    @classmethod
+    def is_erased(cls, app, external_user_id) -> bool:
+        return cls.objects.filter(app=app, user_hash=cls.hash_of(app, external_user_id)).exists()
+
+    @classmethod
+    def lift(cls, app, external_user_id):
+        cls.objects.filter(app=app, user_hash=cls.hash_of(app, external_user_id)).delete()

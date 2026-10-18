@@ -55,7 +55,7 @@ def url_is_allowed_for(app, url: str) -> bool:
     return host in allowed_hosts or (parent and host.endswith("." + parent))
 
 
-def trial_days_for(stripe, plan, customer, quantity: int) -> int:
+def trial_days_for(stripe, plan, stripe_customer_id: str, quantity: int, *, known_subscriber=False) -> int:
     """Jours d'essai à accorder pour cette souscription. 0 = aucun.
 
     Trois conditions cumulatives, décidées le 2026-07-28 :
@@ -64,22 +64,26 @@ def trial_days_for(stripe, plan, customer, quantity: int) -> int:
     - le client n'a **jamais** eu d'abonnement — sinon il suffirait de résilier et de
       se réabonner pour être gratuit à perpétuité.
 
-    L'antériorité est vérifiée chez Stripe et non dans le miroir local : un webhook
-    manqué rendrait le miroir incomplet, et offrirait un essai déjà consommé.
+    `stripe_customer_id` est le `cus_…` (cf. `known_stripe_customer_id`), jamais la
+    FK `AppCustomer.customer`, dont la valeur brute est un entier interne : c'est
+    ce qui rendait le contrôle inopérant (audit 2026-10-18, I3).
+    `known_subscriber` : le miroir local sait déjà qu'il y a eu un abonnement.
+    L'antériorité est sinon vérifiée chez Stripe : un webhook manqué rendrait le
+    miroir incomplet, et offrirait un essai déjà consommé.
     """
     if not plan.trial_days or int(quantity or 1) != 1:
         return 0
-
-    customer_id = getattr(customer, "customer_id", None) if customer else None
-    if not customer_id:
+    if known_subscriber:
+        return 0
+    if not stripe_customer_id:
         return plan.trial_days  # jamais vu chez Stripe : premier abonnement
 
     try:
-        anterieurs = stripe.Subscription.list(customer=customer_id, status="all", limit=1)
+        anterieurs = stripe.Subscription.list(customer=stripe_customer_id, status="all", limit=1)
     except Exception:
         # En cas de doute on n'offre pas : mieux vaut un essai refuse a tort qu'un
         # essai offert en boucle.
-        logger.warning("trial_check_failed", extra={"customer": customer_id})
+        logger.warning("trial_check_failed", extra={"customer": stripe_customer_id})
         return 0
 
     return 0 if anterieurs.get("data") else plan.trial_days
