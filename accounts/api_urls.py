@@ -3,7 +3,6 @@ from rest_framework_simplejwt.views import TokenBlacklistView, TokenRefreshView
 
 from .api_views import MeView, PasswordChangeView, StaffTokenObtainPairView
 
-
 urlpatterns = [
     path("token/", StaffTokenObtainPairView.as_view(), name="token-obtain"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),

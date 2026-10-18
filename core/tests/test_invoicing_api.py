@@ -33,7 +33,8 @@ def stripe_configure(settings):
 @pytest.fixture
 def facture_miree(db):
     """Une facture telle que dj-stripe la mire, avec ce que la console en lit."""
-    from datetime import datetime, timezone as tz
+    from datetime import datetime
+    from datetime import timezone as tz
 
     from djstripe.models import Customer, Invoice
 

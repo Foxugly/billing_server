@@ -27,7 +27,8 @@ def app(db):
 
 
 def _event(id, type, objet=None, created=None):
-    from datetime import datetime, timezone as tz
+    from datetime import datetime
+    from datetime import timezone as tz
 
     from djstripe.models import Event
 
@@ -80,7 +81,8 @@ def test_an_event_we_act_on_but_cannot_attribute_is_flagged(staff_client, app):
 
 @pytest.mark.django_db
 def test_the_newest_event_comes_first(staff_client, app):
-    from datetime import datetime, timezone as tz
+    from datetime import datetime
+    from datetime import timezone as tz
 
     _event("evt_vieux", "customer.subscription.updated", ABONNEMENT,
            created=datetime(2026, 7, 1, tzinfo=tz.utc))

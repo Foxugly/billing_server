@@ -8,7 +8,7 @@ des autres sites.
 """
 import csv
 import logging
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 from django.db.models import Count, Q
 from django.http import HttpResponse
@@ -357,7 +357,7 @@ def _borne(valeur: str, fin: bool):
     """Convertit une date `YYYY-MM-DD` de l'URL en instant conscient du fuseau."""
     if not valeur:
         return None
-    jour = datetime.strptime(valeur, "%Y-%m-%d").date()
+    jour = date.fromisoformat(valeur)
     limite = time.max if fin else time.min
     return timezone.make_aware(datetime.combine(jour, limite))
 

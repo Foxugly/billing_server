@@ -1,6 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
-
+from django.db import IntegrityError
 
 User = get_user_model()
 
@@ -39,7 +39,7 @@ def test_email_is_the_username_field_and_has_no_username_column():
 def test_email_is_unique():
     User.objects.create_user(email="dup@example.com", password=TEST_PASSWORD)
 
-    with pytest.raises(Exception):
+    with pytest.raises(IntegrityError):
         User.objects.create_user(email="dup@example.com", password=TEST_PASSWORD)
 
 

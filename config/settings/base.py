@@ -3,7 +3,6 @@ from pathlib import Path
 import environ
 from celery.schedules import crontab
 
-
 BASE_DIR = Path(__file__).resolve().parents[2]
 env = environ.Env(DEBUG=(bool, False))
 environ.Env.read_env(BASE_DIR / ".env")

@@ -15,21 +15,25 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from stripe import StripeError
 
-from .erasure import BillingUnconfigured, cancel_subscriptions, customer_ids_for, erase_user
+from .erasure import (
+    BillingUnconfigured,
+    cancel_subscriptions,
+    customer_ids_for,
+    erase_user,
+)
 from .models import AppCustomer, Entitlement, ErasedUser, Plan
 from .permissions import HasValidAppSignature
 from .services import period_end_of, recompute_entitlement
-from .webhooks import plan_for_price, price_id_of, quantity_of
 from .stripe_gateway import (
     active_subscription_for,
     apply_quantity_change,
     preview_quantity_change,
-    stripe_client,
-    stripe_configured,
     return_hosts_of,
+    stripe_client,
     trial_days_for,
     url_is_allowed_for,
 )
+from .webhooks import plan_for_price, price_id_of, quantity_of
 
 logger = logging.getLogger("billing")
 

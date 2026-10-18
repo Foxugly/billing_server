@@ -14,7 +14,6 @@ from .admin_views import (
     TaxCodeView,
 )
 
-
 router = DefaultRouter()
 router.register("apps", AppViewSet, basename="admin-app")
 router.register("plans", PlanViewSet, basename="admin-plan")

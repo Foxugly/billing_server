@@ -17,7 +17,12 @@ from django.db.models import Q
 from djstripe.event_handlers import djstripe_receiver
 
 from .models import App, EntitlementDelivery, Plan
-from .services import ENDED_STATUSES, TERMINAL_STATUSES, period_end_of, recompute_entitlement
+from .services import (
+    ENDED_STATUSES,
+    TERMINAL_STATUSES,
+    period_end_of,
+    recompute_entitlement,
+)
 
 logger = logging.getLogger("billing")
 

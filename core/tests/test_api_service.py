@@ -338,7 +338,7 @@ def test_the_history_says_what_was_subscribed_not_just_that_something_was(app, s
         },
     )
 
-    ligne = signed_get(f"/api/v1/history/?external_user_id=42", app).json()["subscriptions"][0]
+    ligne = signed_get("/api/v1/history/?external_user_id=42", app).json()["subscriptions"][0]
 
     assert ligne["plan"] == plan.code
     assert ligne["plan_name"] == "Par application"

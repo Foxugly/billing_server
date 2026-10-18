@@ -13,7 +13,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from stripe import InvalidRequestError, StripeError
 
-from core.models import App, AppCustomer, EntitlementDelivery, Entitlement, ErasedUser, Plan
+from core.models import (
+    App,
+    AppCustomer,
+    Entitlement,
+    EntitlementDelivery,
+    ErasedUser,
+    Plan,
+)
 from core.webhooks import handle_subscription_event
 
 CANCEL_URL = "/api/v1/subscriptions/cancel/"

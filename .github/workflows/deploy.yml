@@ -118,8 +118,38 @@ jobs:
           DB_PASSWORD: postgres
         run: pytest -q
 
+  # Audit 2026-10-18, M11. Versions épinglées (OPERATIONS.md §3.22) : une montée
+  # de ruff active de nouvelles règles et casserait la CI sans changement de code.
+  # Garder ces versions égales à celles d'un éventuel pre-commit.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff==0.16.10
+      - name: Ruff
+        run: ruff check . --output-format=github
+
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install pip-audit
+        run: pip install pip-audit==2.10.1
+      # Résout requirements.txt dans un environnement isolé et le confronte à la
+      # base PyPI/OSV. --strict : un paquet non résolu fait échouer le job au lieu
+      # d'être ignoré en silence.
+      - name: pip-audit
+        run: pip-audit -r requirements.txt --strict
+
   deploy:
-    needs: test
+    needs: [test, lint, pip-audit]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     environment: production
