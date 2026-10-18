@@ -7,7 +7,13 @@ compte non-staff, plutôt que de délivrer un jeton qui ne servirait à rien —
 refus clair vaut mieux qu'un jeton inerte qu'on croira valide.
 """
 from django.contrib.auth import get_user_model
-from rest_framework import generics, permissions, serializers
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework import generics, permissions, serializers, status
+from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
+from rest_framework.views import APIView
+from drf_spectacular.utils import extend_schema
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -71,3 +77,61 @@ class MeView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+
+class PasswordChangeThrottle(UserRateThrottle):
+    """Un jeton volé ne doit pas servir à deviner le mot de passe actuel."""
+
+    scope = "password_change"
+    rate = "5/min"
+
+
+def _password_error(code, detail, **extra):
+    return Response(
+        {"code": code, "detail": detail, **extra}, status=status.HTTP_400_BAD_REQUEST
+    )
+
+
+class PasswordChangeView(APIView):
+    """POST /api/v1/auth/password/change/ — l'opérateur change son mot de passe.
+
+    Corps : {current_password, new_password}. Les erreurs portent un `code`
+    stable que la console traduit : `invalid` (champ manquant),
+    `current_password_invalid`, `password_unchanged`, `password_invalid`
+    (refusé par les validateurs Django, messages dans `messages`). Aucun jeton
+    n'est réémis : l'accès en cours reste valable jusqu'à son expiration.
+    """
+
+    permission_classes = [permissions.IsAdminUser]
+    throttle_classes = [PasswordChangeThrottle]
+
+    @extend_schema(request=PasswordChangeSerializer, responses={204: None, 400: None})
+    def post(self, request):
+        serializer = PasswordChangeSerializer(data=request.data)
+        if not serializer.is_valid():
+            return _password_error("invalid", "Champs manquants.", fields=serializer.errors)
+        current = serializer.validated_data["current_password"]
+        new = serializer.validated_data["new_password"]
+        user = request.user
+
+        if not user.check_password(current):
+            return _password_error("current_password_invalid", "Mot de passe actuel incorrect.")
+        if new == current:
+            return _password_error(
+                "password_unchanged", "Le nouveau mot de passe doit être différent."
+            )
+        try:
+            validate_password(new, user=user)
+        except DjangoValidationError as exc:
+            return _password_error(
+                "password_invalid", "Mot de passe refusé.", messages=list(exc.messages)
+            )
+
+        user.set_password(new)
+        user.save(update_fields=["password"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
