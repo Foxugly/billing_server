@@ -177,3 +177,28 @@ def test_the_data_migration_seeds_the_spa_host_from_the_api_host():
     # configuration explicite dans la console.
     assert odd.return_hosts == []
     assert done.return_hosts == ["x.foxugly.invalid"]
+
+
+# ------------------------------------------------------------------ admin Django
+
+@pytest.mark.django_db
+def test_the_model_validator_guards_the_django_admin_too(app):
+    """L'admin Django édite le JSON brut : le validateur vit sur le champ du modèle,
+    pas seulement dans le sérialiseur de la console."""
+    from django.core.exceptions import ValidationError
+
+    app.return_hosts = ["*.foxugly.invalid"]
+    with pytest.raises(ValidationError):
+        app.full_clean()
+
+    app.return_hosts = "poker.foxugly.invalid"  # une chaîne, pas une liste
+    with pytest.raises(ValidationError):
+        app.full_clean()
+
+
+@pytest.mark.django_db
+def test_saving_normalises_the_hosts(app):
+    app.return_hosts = [" Poker.foxugly.invalid ", "poker.foxugly.invalid"]
+    app.save()
+    app.refresh_from_db()
+    assert app.return_hosts == ["poker.foxugly.invalid"]

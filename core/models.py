@@ -18,6 +18,8 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from .validators import clean_host, validate_return_hosts
+
 
 def generate_shared_secret() -> str:
     """Secret HMAC pour la signature service-à-service (§8)."""
@@ -42,6 +44,7 @@ class App(models.Model):
     return_hosts = models.JSONField(
         default=list,
         blank=True,
+        validators=[validate_return_hosts],
         help_text=(
             "Hôtes vers lesquels Stripe peut renvoyer le client après checkout ou portail, "
             'ex. ["poker.foxugly.com"]. Comparaison exacte, sans joker. Vide = checkout et '
@@ -61,6 +64,17 @@ class App(models.Model):
 
     def __str__(self):
         return self.slug
+
+    def save(self, *args, **kwargs):
+        # Normalisation douce (minuscules, espaces, doublons) ; la validation
+        # stricte est le rôle de `validate_return_hosts` (admin, console).
+        if isinstance(self.return_hosts, list):
+            hosts = []
+            for host in map(clean_host, self.return_hosts):
+                if host and host not in hosts:
+                    hosts.append(host)
+            self.return_hosts = hosts
+        super().save(*args, **kwargs)
 
     def rotate_secret(self) -> str:
         """Génère un nouveau secret et conserve l'ancien le temps que l'app suive.

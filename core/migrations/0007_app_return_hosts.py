@@ -4,6 +4,8 @@ from urllib.parse import urlparse
 
 from django.db import migrations, models
 
+import core.validators
+
 API_SUFFIX = "-api"
 
 
@@ -40,7 +42,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='app',
             name='return_hosts',
-            field=models.JSONField(blank=True, default=list, help_text='Hôtes vers lesquels Stripe peut renvoyer le client après checkout ou portail, ex. ["poker.foxugly.com"]. Comparaison exacte, sans joker. Vide = checkout et portail refusés (400) : une app ne peut renvoyer que vers ses propres pages.'),
+            field=models.JSONField(blank=True, default=list, validators=[core.validators.validate_return_hosts], help_text='Hôtes vers lesquels Stripe peut renvoyer le client après checkout ou portail, ex. ["poker.foxugly.com"]. Comparaison exacte, sans joker. Vide = checkout et portail refusés (400) : une app ne peut renvoyer que vers ses propres pages.'),
         ),
         migrations.RunPython(seed_return_hosts, migrations.RunPython.noop),
     ]

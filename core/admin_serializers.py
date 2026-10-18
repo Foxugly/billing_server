@@ -41,28 +41,15 @@ class AppSerializer(serializers.ModelSerializer):
         return value
 
     def validate_return_hosts(self, value):
-        """Des noms d'hôte nus de la flotte : ni schéma, ni chemin, ni port, ni
-        joker. Un joker rouvrirait exactement ce que l'audit M2 a fermé."""
-        import re
+        """Hôtes nus de la flotte, normalisés (cf. core.validators)."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
 
-        from django.conf import settings
+        from .validators import normalize_return_hosts
 
-        if not isinstance(value, list):
-            raise serializers.ValidationError("Liste de noms d'hôte attendue.")
-        suffixes = tuple(settings.BILLING_APP_HOST_SUFFIXES)
-        label = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-        pattern = re.compile(rf"^{label}(?:\.{label})+$")
-        hosts = []
-        for raw in value:
-            host = str(raw or "").strip().lower()
-            if not pattern.match(host) or not host.endswith(suffixes):
-                raise serializers.ValidationError(
-                    f"« {raw} » : nom d'hôte nu attendu (sans https:// ni chemin), "
-                    f"se terminant par {' ou '.join(suffixes)}."
-                )
-            if host not in hosts:
-                hosts.append(host)
-        return hosts
+        try:
+            return normalize_return_hosts(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
 
 
 class PlanSerializer(serializers.ModelSerializer):
