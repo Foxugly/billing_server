@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.models import App, Entitlement, Plan
+from core.models import Entitlement, Plan
 from core.services import recompute_entitlement
 from core.webhooks import handle_subscription_event, quantity_of
 

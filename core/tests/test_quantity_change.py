@@ -11,7 +11,6 @@ import pytest
 from core.models import Entitlement
 from core.stripe_gateway import active_subscription_for, first_item_of
 
-
 ABONNEMENT = {
     "id": "sub_1",
     "customer": "cus_1",

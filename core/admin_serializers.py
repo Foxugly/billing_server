@@ -17,7 +17,7 @@ class AppSerializer(serializers.ModelSerializer):
         model = App
         fields = (
             "id", "slug", "name", "base_url", "entitlement_path", "entitlement_url",
-            "active", "plans_count", "secret_rotated_at", "created_at",
+            "return_hosts", "active", "plans_count", "secret_rotated_at", "created_at",
         )
         # Le secret n'est JAMAIS exposé, même à un opérateur : la console n'en a
         # pas besoin (elle teste la connectivité côté serveur) et le faire
@@ -39,6 +39,17 @@ class AppSerializer(serializers.ModelSerializer):
                 f"URL https:// attendue, sur un hôte se terminant par {' ou '.join(suffixes)}."
             )
         return value
+
+    def validate_return_hosts(self, value):
+        """Hôtes nus de la flotte, normalisés (cf. core.validators)."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from .validators import normalize_return_hosts
+
+        try:
+            return normalize_return_hosts(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages) from exc
 
 
 class PlanSerializer(serializers.ModelSerializer):

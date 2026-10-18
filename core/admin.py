@@ -11,7 +11,7 @@ class PlanInline(admin.TabularInline):
 
 @admin.register(App)
 class AppAdmin(admin.ModelAdmin):
-    list_display = ("slug", "name", "base_url", "active")
+    list_display = ("slug", "name", "base_url", "return_hosts", "active")
     list_filter = ("active",)
     search_fields = ("slug", "name")
     inlines = [PlanInline]

@@ -60,3 +60,15 @@ class HasValidAppSignature(BasePermission):
 
         request.billing_app = app
         return True
+
+
+class IsSuperUser(BasePermission):
+    """Gestes à effet commercial ou de sécurité (audit 2026-10-18, M8).
+
+    `IsAdminUser` ne vérifie que `is_staff` : un opérateur de lecture pouvait
+    roter un secret d'app, offrir un accès ou émettre une facture en live.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(user and user.is_authenticated and user.is_staff and user.is_superuser)

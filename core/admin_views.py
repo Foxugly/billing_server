@@ -8,7 +8,7 @@ des autres sites.
 """
 import csv
 import logging
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 from django.db.models import Count, Q
 from django.http import HttpResponse
@@ -40,6 +40,8 @@ from .invoicing import (
     void_invoice,
 )
 from .models import App, AppCustomer, Entitlement, EntitlementDelivery, Plan
+from .pagination import paginated
+from .permissions import IsSuperUser
 from .stripe_gateway import stripe_configured
 
 logger = logging.getLogger("billing")
@@ -48,13 +50,31 @@ logger = logging.getLogger("billing")
 MONTHS_PER_YEAR = 12
 
 
-class StaffViewSet(viewsets.ModelViewSet):
+class SuperuserActionsMixin:
+    """Lecture pour tout opérateur (`is_staff`), gestes listés réservés au
+    superuser (audit 2026-10-18, M8) : rotation de secret, accès offert,
+    catalogue, factures. Ping et rejeu restent ouverts : sans effet commercial."""
+
     permission_classes = [permissions.IsAdminUser]
+    superuser_actions: frozenset = frozenset()
+
+    def get_permissions(self):
+        if getattr(self, "action", None) in self.superuser_actions:
+            return [permissions.IsAdminUser(), IsSuperUser()]
+        return super().get_permissions()
+
+
+WRITE_ACTIONS = frozenset({"create", "update", "partial_update", "destroy"})
+
+
+class StaffViewSet(SuperuserActionsMixin, viewsets.ModelViewSet):
+    superuser_actions = WRITE_ACTIONS
 
 
 class AppViewSet(StaffViewSet):
     queryset = App.objects.all()
     serializer_class = AppSerializer
+    superuser_actions = WRITE_ACTIONS | {"rotate_secret"}
 
     @action(detail=True, methods=["post"])
     def rotate_secret(self, request, pk=None):
@@ -126,7 +146,7 @@ class EventViewSet(viewsets.ViewSet):
             evenements = evenements.filter(type__icontains=motif)
         if request.query_params.get("handled") == "true":
             evenements = evenements.filter(type__in=SUBSCRIPTION_EVENTS)
-        return Response(EventSerializer(list(evenements), many=True).data)
+        return paginated(self, request, evenements, EventSerializer)
 
     @action(detail=True, methods=["post"])
     def replay(self, request, pk=None):
@@ -186,7 +206,7 @@ class PriceViewSet(viewsets.ViewSet):
         # Les prix archivés sont exclus : Stripe refuse de vendre dessus, les
         # proposer donnerait un plan invendable.
         prix = Price.objects.filter(active=True).select_related("product").order_by("id")
-        return Response(PriceSerializer(list(prix), many=True).data)
+        return paginated(self, request, prix, PriceSerializer)
 
 
 class CustomerViewSet(StaffViewSet):
@@ -204,9 +224,9 @@ class CustomerViewSet(StaffViewSet):
         return queryset
 
 
-class EntitlementViewSet(viewsets.ReadOnlyModelViewSet):
+class EntitlementViewSet(SuperuserActionsMixin, viewsets.ReadOnlyModelViewSet):
     # Lecture seule + actions : un POST sur la racine ouvrait `create` (M7).
-    permission_classes = [permissions.IsAdminUser]
+    superuser_actions = frozenset({"grant"})
     queryset = Entitlement.objects.select_related("app")
     serializer_class = EntitlementSerializer
 
@@ -337,12 +357,12 @@ def _borne(valeur: str, fin: bool):
     """Convertit une date `YYYY-MM-DD` de l'URL en instant conscient du fuseau."""
     if not valeur:
         return None
-    jour = datetime.strptime(valeur, "%Y-%m-%d").date()
+    jour = date.fromisoformat(valeur)
     limite = time.max if fin else time.min
     return timezone.make_aware(datetime.combine(jour, limite))
 
 
-class InvoiceViewSet(viewsets.ViewSet):
+class InvoiceViewSet(SuperuserActionsMixin, viewsets.ViewSet):
     """Emission et suivi des factures de prestation (§16).
 
     Les objets vivent chez Stripe ; ce ViewSet pilote leur cycle de vie et lit le
@@ -351,7 +371,7 @@ class InvoiceViewSet(viewsets.ViewSet):
     n'aurait aucun sens.
     """
 
-    permission_classes = [permissions.IsAdminUser]
+    superuser_actions = frozenset({"create", "finalize", "send", "mark_paid", "void"})
 
     def _factures(self):
         from djstripe.models import Invoice
@@ -363,7 +383,7 @@ class InvoiceViewSet(viewsets.ViewSet):
         origine = request.query_params.get("origin")
         if origine == "direct":
             factures = [f for f in factures if (f.metadata or {}).get("origin") == "direct"]
-        return Response(InvoiceSerializer(list(factures), many=True).data)
+        return paginated(self, request, factures, InvoiceSerializer)
 
     def create(self, request):
         if not stripe_configured():

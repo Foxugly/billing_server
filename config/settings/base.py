@@ -3,7 +3,6 @@ from pathlib import Path
 import environ
 from celery.schedules import crontab
 
-
 BASE_DIR = Path(__file__).resolve().parents[2]
 env = environ.Env(DEBUG=(bool, False))
 environ.Env.read_env(BASE_DIR / ".env")
@@ -151,7 +150,16 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.reconcile_entitlements",
         "schedule": crontab(hour=4, minute=30),
     },
+    # Rétention (audit 2026-10-18, M5) : livraisons et événements Stripe anciens.
+    "purge-expired-data": {
+        "task": "core.purge_expired_data",
+        "schedule": crontab(hour=5, minute=0),
+    },
 }
+
+# Durées de conservation, en jours (core/retention.py).
+BILLING_DELIVERY_RETENTION_DAYS = env.int("BILLING_DELIVERY_RETENTION_DAYS", default=180)
+BILLING_STRIPE_EVENT_RETENTION_DAYS = env.int("BILLING_STRIPE_EVENT_RETENTION_DAYS", default=365)
 
 # L'anti-rejeu des signatures HMAC s'appuie sur ce cache : il DOIT être partagé
 # entre les workers gunicorn. Avec LocMem (par processus), un rejeu passerait une
@@ -176,6 +184,9 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Listes de la console paginées (audit M5). Sans effet sur l'API signée,
+    # dont les vues sont des APIView.
+    "DEFAULT_PAGINATION_CLASS": "core.pagination.ConsolePagination",
     # nginx est le seul proxy devant gunicorn : l'identité d'un client anonyme est
     # la DERNIÈRE entrée de X-Forwarded-For. Sans ça, un XFF inventé contourne
     # toute limite de débit anonyme (OPERATIONS.md §3.25).

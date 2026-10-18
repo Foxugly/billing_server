@@ -82,7 +82,4 @@ def verify_signature(app, method: str, path: str, body: bytes, timestamp, signat
     # Rejeu : une signature n'est utilisable qu'une fois, mémorisée le temps de
     # la fenêtre — au-delà, l'horodatage la rejette de toute façon.
     key = _REPLAY_PREFIX + hashlib.sha256(signature.encode()).hexdigest()
-    if not cache.add(key, 1, timeout=SIGNATURE_WINDOW_SECONDS):
-        return False
-
-    return True
+    return bool(cache.add(key, 1, timeout=SIGNATURE_WINDOW_SECONDS))

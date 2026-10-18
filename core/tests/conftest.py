@@ -19,7 +19,12 @@ def clear_replay_cache():
 
 @pytest.fixture
 def app(db):
-    return App.objects.create(slug="poker", name="Poker", base_url="https://poker-api.foxugly.invalid")
+    return App.objects.create(
+        slug="poker",
+        name="Poker",
+        base_url="https://poker-api.foxugly.invalid",
+        return_hosts=["poker.foxugly.invalid"],
+    )
 
 
 @pytest.fixture

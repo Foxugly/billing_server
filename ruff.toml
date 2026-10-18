@@ -1,0 +1,22 @@
+# Configuration ruff — introduite le 2026-10-18 avec le job CI `lint` (audit M11).
+# Version épinglée dans .github/workflows/deploy.yml (même version que QuizOnline).
+
+extend-exclude = ["*/migrations/*"]
+
+[lint]
+ignore = [
+    # RUF012 (attribut de classe mutable sans ClassVar) : c'est l'API déclarative
+    # de Django et DRF (`permission_classes = [...]`, `Meta.ordering`,
+    # `list_display`…). Les annoter combattrait le framework sans éviter de bug.
+    "RUF012",
+    # BLE001 — `except Exception` : frontières défensives assumées (livraison,
+    # /health, contrôle d'essai) qui journalisent puis dégradent ou reprogramment.
+    "BLE001",
+    # SIM117 — `with` imbriqués : pur style.
+    "SIM117",
+]
+
+[lint.per-file-ignores]
+# `from .base import *` est l'idiome de découpage des réglages Django. Exclusion
+# par fichier plutôt que `# noqa` : indépendante de la version de ruff.
+"config/settings/*.py" = ["F403", "F405", "F401"]

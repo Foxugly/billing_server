@@ -302,6 +302,10 @@ signature HMAC. Aucune n'est accessible depuis un navigateur.
 | POST | `/api/v1/stripe/webhook/` | (Stripe) | 200 — signature **Stripe**, pas HMAC Foxugly |
 | GET | `/health/` | — | 200 + check DB |
 
+`success_url`, `cancel_url` et `return_url` doivent viser un hôte listé dans
+`App.return_hosts` (correspondance exacte, réglée dans la console). Hôte hors liste →
+400 `bad_return_url` ; liste vide → 400 `return_hosts_unconfigured` (audit 2026-10-18, M2).
+
 Les routes de la console (`/api/admin/…`) sont authentifiées en JWT simplejwt avec
 `IsAdminUser`, et ne sont **pas** signées HMAC.
 

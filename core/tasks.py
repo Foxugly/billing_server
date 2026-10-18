@@ -135,6 +135,16 @@ def reconcile_entitlements():
     return {"examined": examined, "changed": changed, "pushed": pushed}
 
 
+@shared_task(name="core.purge_expired_data")
+def purge_expired_data():
+    """Purge quotidienne des données au-delà de leur durée de conservation (M5)."""
+    from .retention import purge_expired_data as purge
+
+    counts = purge()
+    logger.info("retention_purge", extra=counts)
+    return counts
+
+
 def ping_app(app):
     """Teste la connectivité et le secret vers une app. Renvoie (ok, détail).
 

@@ -5,7 +5,6 @@ import pytest
 
 from core.signing import SIGNATURE_WINDOW_SECONDS, sign_payload
 
-
 URL = "/api/v1/ping/"
 
 

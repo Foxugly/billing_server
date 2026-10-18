@@ -13,13 +13,18 @@ de l'API 2025+, période sur les items) — c'est l'angle mort qui avait laissé
 passer B2.
 """
 import copy
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime
+from datetime import timezone as dt_timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from core.models import AppCustomer, Entitlement, EntitlementDelivery, Plan
-from core.webhooks import handle_checkout_completed, handle_subscription_event, resolve_target
+from core.webhooks import (
+    handle_checkout_completed,
+    handle_subscription_event,
+    resolve_target,
+)
 
 
 @pytest.fixture(autouse=True)

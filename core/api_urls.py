@@ -3,15 +3,14 @@ from django.urls import path
 from .api_views import (
     CancelSubscriptionsView,
     CheckoutView,
-    EraseUserView,
     EntitlementView,
+    EraseUserView,
     HistoryView,
     PingView,
     PlansView,
     PortalView,
     QuantityView,
 )
-
 
 app_name = "billing_api"
 

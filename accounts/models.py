@@ -3,7 +3,11 @@
 Le service billing n'a pas d'utilisateurs publics : ces comptes sont ceux des
 opérateurs (staff) qui accèdent à la console et au Django admin.
 """
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from django.contrib.auth.models import (
+    AbstractBaseUser,
+    BaseUserManager,
+    PermissionsMixin,
+)
 from django.db import models
 from django.utils import timezone
 
