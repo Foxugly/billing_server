@@ -146,6 +146,10 @@ jobs:
       # OIDC -> SSM (pas de clé SSH statique). AWS-RunShellScript tourne en root :
       # il installe chaque artefact privilégié depuis le BLOB GIT COMMITÉ — jamais
       # par cp depuis l'arbre django (§3.10 / §3.11) — puis lance deploy.sh en django.
+      # Root lit ces blobs dans SON PROPRE miroir nu (/var/lib/fleet-deploy,
+      # root:root 700), alimenté depuis GitHub au SHA exact poussé — jamais dans
+      # le checkout django, dont .git (refs, config, hooks) est réécrivable par
+      # django pour faire installer ou exécuter du contenu arbitraire par root.
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -163,13 +167,19 @@ jobs:
             "set -eu",
             "export HOME=/root",
             "APP=/var/www/django_websites/billing_server",
-            "git config --global --get-all safe.directory 2>/dev/null | grep -qx $APP || git config --global --add safe.directory $APP",
+            "SHA=${{ github.sha }}",
+            "M=/var/lib/fleet-deploy/billing_server.git",
+            "git config --global --fixed-value --unset-all safe.directory $APP || true",
+            "install -d -m 700 -o root -g root /var/lib/fleet-deploy",
+            "[ -d $M ] || git init --quiet --bare $M",
+            "git --git-dir=$M fetch --quiet --depth=1 https://github.com/Foxugly/billing_server.git $SHA",
+            "git --git-dir=$M cat-file -e $SHA^{commit}",
             "sudo -u django bash -c 'umask 027; cd '$APP' && git fetch --quiet origin main && git reset --hard --quiet origin/main'",
-            "git -C $APP show origin/main:deploy/fetch-env-from-ssm.sh > /usr/local/sbin/billing-env-fetch.sh",
+            "git --git-dir=$M show $SHA:deploy/fetch-env-from-ssm.sh > /usr/local/sbin/billing-env-fetch.sh",
             "chown root:root /usr/local/sbin/billing-env-fetch.sh && chmod 0755 /usr/local/sbin/billing-env-fetch.sh",
-            "for u in billing-env-fetch billing-gunicorn billing-celery billing-celery-beat; do git -C $APP show origin/main:deploy/systemd/$u.service > /etc/systemd/system/$u.service; done",
-            "git -C $APP show origin/main:deploy/nginx/billing-limits.conf > /etc/nginx/conf.d/billing-limits.conf",
-            "git -C $APP show origin/main:deploy/nginx/billing-api.conf > /etc/nginx/sites-available/billing-api.conf",
+            "for u in billing-env-fetch billing-gunicorn billing-celery billing-celery-beat; do git --git-dir=$M show $SHA:deploy/systemd/$u.service > /etc/systemd/system/$u.service; done",
+            "git --git-dir=$M show $SHA:deploy/nginx/billing-limits.conf > /etc/nginx/conf.d/billing-limits.conf",
+            "git --git-dir=$M show $SHA:deploy/nginx/billing-api.conf > /etc/nginx/sites-available/billing-api.conf",
             "ln -sf ../sites-available/billing-api.conf /etc/nginx/sites-enabled/billing-api.conf",
             "systemctl daemon-reload",
             "systemctl enable billing-env-fetch billing-gunicorn billing-celery billing-celery-beat",
