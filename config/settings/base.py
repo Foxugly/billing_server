@@ -38,7 +38,9 @@ CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
 FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="https://billing.foxugly.com")
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # admin.site avec 2FA TOTP obligatoire (admin_2fa/, deploy/DEPLOY.md « Admin 2FA ») :
+    # remplace "django.contrib.admin", même label d'app.
+    "admin_2fa.apps.OTPAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
@@ -50,6 +52,10 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
     "djstripe",
+    "django_otp",
+    "django_otp.plugins.otp_totp",
+    "django_otp.plugins.otp_static",
+    "admin_2fa",
     "accounts.apps.AccountsConfig",
     "core.apps.CoreConfig",
     "health.apps.HealthConfig",
@@ -62,6 +68,10 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # Lie l'appareil OTP vérifié de la session à request.user (2FA de l'admin).
+    # Après AuthenticationMiddleware ; les utilisateurs JWT de l'API ne sont pas
+    # concernés (DRF authentifie plus tard).
+    "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -124,6 +134,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Utilisateur email-only (OPERATIONS.md §3.16). Posé AVANT le premier migrate :
 # changer AUTH_USER_MODEL sur une base existante impose un runbook SQL manuel.
 AUTH_USER_MODEL = "accounts.User"
+
+# --- 2FA de l'admin (django-otp). Libellé affiché dans l'appli d'authentification.
+# Throttling actif (facteur 1 = 1 s, 2 s, 4 s... après chaque mauvais code, par appareil).
+OTP_TOTP_ISSUER = "Billing admin (billing-api.foxugly.com)"
+OTP_TOTP_THROTTLE_FACTOR = 1
+OTP_STATIC_THROTTLE_FACTOR = 1
 
 # --- Stripe (dj-stripe) ---------------------------------------------------------
 # Les clés sont absentes en dev/test et le service démarre sans : rien ici n'appelle

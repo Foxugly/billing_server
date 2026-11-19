@@ -7,6 +7,7 @@ découlent. Les sites de la flotte ne parlent jamais à Stripe directement.
 - Design : `docs/superpowers/specs/2026-07-28-billing-central-design.md`
 - Ops : `OPERATIONS.md` du repo `Foxugly/foxugly-ops` (source de vérité)
 - Port gunicorn : `127.0.0.1:8007` · vhosts `billing-api.foxugly.com` / `billing.foxugly.com`
+- Django admin : 2FA TOTP obligatoire (`admin_2fa/`) — voir `CLAUDE.md` « Admin 2FA »
 
 ## Développement
 
