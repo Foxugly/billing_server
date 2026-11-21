@@ -12,13 +12,21 @@ découlent. Les sites de la flotte ne parlent jamais à Stripe directement.
 ## Développement
 
     python3.12 -m venv .venv
-    .venv/bin/pip install -r requirements.txt
+    .venv/bin/pip install --require-hashes -r requirements.txt
     .venv/bin/pytest -q
     .venv/bin/python manage.py runserver
 
 La box de production tourne en **Python 3.12** — c'est la version que la CI utilise et qui fait
 foi. Un venv local sur une version plus récente est toléré (comme sur Poker), mais c'est la CI
 qui valide.
+
+Dépendances : `requirements.in` liste les dépendances directes (plages) ; `requirements.txt` est le
+verrou à hashes qui en est généré pour la box (Linux, Python 3.12) — ce qu'installent la CI et le
+déploiement, à l'identique. Sous Windows ou sur une autre version de Python, installer
+`requirements.in` à la place (les dépendances propres à une plateforme, comme `tzdata`, sont exclues
+du verrou). Après une modification de `requirements.in`, régénérer le verrou :
+
+    uv pip compile requirements.in --generate-hashes --python-version 3.12 --python-platform x86_64-unknown-linux-gnu -o requirements.txt
 
 ## Authentification de la console (JWT opérateur)
 

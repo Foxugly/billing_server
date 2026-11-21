@@ -12,7 +12,13 @@ VENV="$APP_DIR/.venv"
 cd "$APP_DIR"
 
 echo ">>> Installing dependencies..."
-"$VENV/bin/pip" install --quiet -r requirements.txt
+# requirements.txt is a hash-pinned lock (uv pip compile requirements.in, Linux /
+# Python 3.12). A plain `pip install -r` never upgrades a package already
+# installed inside its range, so prod silently missed releases CI had tested.
+# Installing the exact lock makes prod run what CI ran; --no-deps means nothing
+# is resolved on the box, and pip check fails the deploy on an incomplete lock.
+"$VENV/bin/pip" install --quiet --require-hashes --no-deps -r requirements.txt
+"$VENV/bin/pip" check
 
 # Charger l'env fetché depuis SSM pour que manage.py ait SECRET_KEY, STATE, DB_*.
 # Parsé littéralement (key=value), PAS via `source` : les valeurs peuvent contenir
