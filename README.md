@@ -11,22 +11,23 @@ découlent. Les sites de la flotte ne parlent jamais à Stripe directement.
 
 ## Développement
 
-    python3.12 -m venv .venv
+    python3.14 -m venv .venv
     .venv/bin/pip install --require-hashes -r requirements.txt
     .venv/bin/pytest -q
     .venv/bin/python manage.py runserver
 
-La box de production tourne en **Python 3.12** — c'est la version que la CI utilise et qui fait
-foi. Un venv local sur une version plus récente est toléré (comme sur Poker), mais c'est la CI
-qui valide.
+Le venv de la box de production tourne en **Python 3.14** (deadsnakes, `/usr/bin/python3.14` ; le
+`python3` système reste en 3.12) — c'est la version que la CI utilise et qui fait foi.
+`deploy/deploy.sh` reconstruit le venv sur place s'il n'est pas sur cette version (l'ancien est
+gardé en `.venv.prev` et remis en place si la reconstruction échoue).
 
 Dépendances : `requirements.in` liste les dépendances directes (plages) ; `requirements.txt` est le
-verrou à hashes qui en est généré pour la box (Linux, Python 3.12) — ce qu'installent la CI et le
+verrou à hashes qui en est généré pour la box (Linux, Python 3.14) — ce qu'installent la CI et le
 déploiement, à l'identique. Sous Windows ou sur une autre version de Python, installer
 `requirements.in` à la place (les dépendances propres à une plateforme, comme `tzdata`, sont exclues
 du verrou). Après une modification de `requirements.in`, régénérer le verrou :
 
-    uv pip compile requirements.in --generate-hashes --python-version 3.12 --python-platform x86_64-unknown-linux-gnu -o requirements.txt
+    uv pip compile requirements.in --generate-hashes --python-version 3.14 --python-platform x86_64-unknown-linux-gnu -o requirements.txt
 
 ## Authentification de la console (JWT opérateur)
 

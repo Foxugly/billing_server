@@ -19,6 +19,12 @@ Celery livre les entitlements aux apps ; beat planifie la reprise des livraisons
 depuis le miroir nu `/var/lib/fleet-deploy/billing_server.git` au SHA poussé (`deploy.yml`), jamais
 depuis l'arbre django.
 
+Python : le venv (`.venv`, utilisé par les trois units applicatives) tourne sur
+`/usr/bin/python3.14` (deadsnakes ; le `python3` système reste en 3.12). `deploy/deploy.sh`, lancé
+après le `git reset` du checkout, le reconstruit **sur place** s'il est sur une autre version
+(l'ancien gardé en `.venv.prev`, remis en place si l'installation du verrou échoue), puis relance
+gunicorn, celery et celery-beat.
+
 ## Recharger les secrets après un changement en SSM
 
     sudo systemctl restart billing-env-fetch
