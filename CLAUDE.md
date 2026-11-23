@@ -8,7 +8,7 @@ billing_server — facturation centralisée de la flotte (Django + DRF + dj-stri
 
 ```bash
 .venv/Scripts/python -m pytest -q          # suite complète (CI : PostgreSQL 16, Python 3.14 = venv de la box, deadsnakes)
-ruff check .                               # ruff==0.16.10, comme la CI
+ruff check .                               # ruff==0.17.6, comme la CI
 .venv/Scripts/python manage.py check       # inclut les checks admin_2fa.E00x
 ```
 

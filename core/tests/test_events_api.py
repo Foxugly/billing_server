@@ -4,6 +4,7 @@ Le compte Stripe est partage par toute la flotte : la liste contient donc aussi
 des evenements qui ne nous concernent pas. La page doit le dire, sinon un
 operateur cherche pendant dix minutes pourquoi un evenement « n'a rien fait ».
 """
+from datetime import UTC
 from unittest.mock import patch
 
 import pytest
@@ -28,7 +29,6 @@ def app(db):
 
 def _event(id, type, objet=None, created=None):
     from datetime import datetime
-    from datetime import timezone as tz
 
     from djstripe.models import Event
 
@@ -36,7 +36,7 @@ def _event(id, type, objet=None, created=None):
         id=id,
         type=type,
         livemode=False,
-        created=created or datetime(2026, 7, 29, 10, 0, tzinfo=tz.utc),
+        created=created or datetime(2026, 7, 29, 10, 0, tzinfo=UTC),
         data={"object": objet or {}},
         stripe_data={"id": id, "type": type},
     )
@@ -82,12 +82,11 @@ def test_an_event_we_act_on_but_cannot_attribute_is_flagged(staff_client, app):
 @pytest.mark.django_db
 def test_the_newest_event_comes_first(staff_client, app):
     from datetime import datetime
-    from datetime import timezone as tz
 
     _event("evt_vieux", "customer.subscription.updated", ABONNEMENT,
-           created=datetime(2026, 7, 1, tzinfo=tz.utc))
+           created=datetime(2026, 7, 1, tzinfo=UTC))
     _event("evt_recent", "customer.subscription.updated", ABONNEMENT,
-           created=datetime(2026, 7, 29, tzinfo=tz.utc))
+           created=datetime(2026, 7, 29, tzinfo=UTC))
 
     lignes = staff_client.get("/api/v1/admin/events/").json()["results"]
 
