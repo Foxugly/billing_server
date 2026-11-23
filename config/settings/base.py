@@ -249,18 +249,22 @@ SENTRY_DSN = env("SENTRY_DSN", default="")
 if STATE == "PROD" and SENTRY_DSN:
     import sentry_sdk
 
+    from config.sentry_filter import DATA_COLLECTION as _SENTRY_DATA_COLLECTION
     from config.sentry_filter import before_send as sentry_before_send
+    from config.sentry_filter import scrub_event as _sentry_scrub_event
 
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         environment=env("SENTRY_ENVIRONMENT", default="production"),
         traces_sample_rate=env.float("SENTRY_TRACES_SAMPLE_RATE", default=0.0),
-        send_default_pii=False,
+        # Ni PII, ni cookies, ni corps de requête : voir config/sentry_filter.py.
+        data_collection=_SENTRY_DATA_COLLECTION,
         # Le corps d'un checkout porte l'e-mail du client : jamais dans Sentry (M4).
         max_request_body_size="never",
         # Étiquette la commande de gestion, et tait le `shell` : une faute de
         # frappe dans une session d'audit n'est pas une erreur de production.
         before_send=sentry_before_send,
+        before_send_transaction=_sentry_scrub_event,
     )
 
 LOGGING = {

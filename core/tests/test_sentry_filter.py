@@ -4,7 +4,16 @@ Sur les huit issues de la revue du 2026-07-29, quatre etaient des fautes de
 frappe dans des `manage.py shell` d'audit. Une boite qui melange ca avec de
 vraies erreurs de production cesse d'etre un signal.
 """
-from config.sentry_filter import before_send, django_command
+import warnings
+
+import sentry_sdk
+
+from config.sentry_filter import (
+    DATA_COLLECTION,
+    before_send,
+    django_command,
+    scrub_event,
+)
 
 
 def test_a_web_process_carries_no_command_tag():
@@ -48,3 +57,50 @@ def test_existing_tags_are_preserved():
     )
 
     assert evenement["tags"] == {"app": "billing", "django_command": "migrate"}
+
+
+def _filtre(valeur):
+    # Le scrubber du SDK substitue un AnnotatedValue dont la valeur est "[Filtered]".
+    return getattr(valeur, "value", valeur) == "[Filtered]"
+
+
+def test_data_collection_ne_collecte_aucune_pii_et_sans_avertissement():
+    """`data_collection` remplace `send_default_pii`, sans rien collecter de plus."""
+    with warnings.catch_warnings(record=True) as avertissements:
+        warnings.simplefilter("always")
+        client = sentry_sdk.Client(
+            dsn=None, default_integrations=False, data_collection=DATA_COLLECTION
+        )
+    assert not any("send_default_pii" in str(a.message) for a in avertissements)
+    regles = client.options["data_collection"]
+    assert regles["provided_by_user"] is True
+    assert regles["user_info"] is False
+    assert regles["cookies"] == {"mode": "off"}
+    assert regles["http_bodies"] == []
+    assert regles["queues"] is False
+    assert regles["database_query_data"] is False
+
+
+def test_le_scrubber_du_sdk_reste_applique():
+    """`data_collection` coupe l'EventScrubber du SDK : `scrub_event` le rejoue."""
+    evenement = scrub_event(
+        {
+            "extra": {"password": "hunter2", "page": 3},
+            "breadcrumbs": {"values": [{"data": {"token": "abc", "n": 1}}]},
+            "request": {"headers": {"Authorization": "Bearer x", "Accept": "*/*"}},
+            "user": {"id": "7", "ip_address": "203.0.113.9"},
+        },
+        {},
+    )
+    assert _filtre(evenement["extra"]["password"]) and evenement["extra"]["page"] == 3
+    miette = evenement["breadcrumbs"]["values"][0]["data"]
+    assert _filtre(miette["token"]) and miette["n"] == 1
+    entetes = evenement["request"]["headers"]
+    assert _filtre(entetes["Authorization"]) and entetes["Accept"] == "*/*"
+    assert "ip_address" not in evenement["user"]
+
+
+def test_before_send_nettoie_avant_de_filtrer():
+    evenement = before_send({"extra": {"secret": "s"}}, {}, argv=["gunicorn"])
+    assert _filtre(evenement["extra"]["secret"])
+    assert before_send({"extra": {}}, {}, argv=["manage.py", "shell"]) is None
