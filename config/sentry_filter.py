@@ -18,14 +18,14 @@ Le filtre fait donc deux choses distinctes :
 On ne jette rien d'autre. `migrate` et `collectstatic` tournent au déploiement :
 s'ils échouent, le déploiement est cassé et Sentry a son mot à dire.
 
-Ce que le SDK peut collecter est fixé par `DATA_COLLECTION` (sentry-sdk 2.76,
-remplace `send_default_pii=False`, devenu obsolète) : jamais plus qu'avant.
-Passer `data_collection` coupe l'`EventScrubber` intégré au SDK ; `scrub_event`
-le rejoue donc en tête de `before_send` et en `before_send_transaction`.
+Ce que le SDK peut collecter est fixé par `DATA_COLLECTION` (sentry-sdk 3.0 a
+supprimé `send_default_pii`) : jamais plus qu'avant. sentry-sdk 3.0 a aussi
+supprimé l'`EventScrubber` intégré : `config.sentry_scrub` le remplace, en tête
+de `before_send` (`scrub_event`) et en `before_send_span` (`scrub_span`).
 """
 import sys
 
-from sentry_sdk.scrubber import EventScrubber
+from config.sentry_scrub import scrub_event, scrub_span
 
 # Seule commande dont les erreurs sont, par nature, sous les yeux de leur auteur.
 COMMANDES_MUETTES = {"shell", "dbshell"}
@@ -43,8 +43,8 @@ def django_command(argv=None) -> str:
     return argv[1] if len(argv) > 1 else ""
 
 
-# Termes proxy/IP que le SDK lui-même ajoute quand il traduit
-# `send_default_pii=False` ; s'ajoutent à sa liste noire de clés sensibles.
+# Termes proxy/IP que le guide de migration 3.0 donne pour retrouver
+# `send_default_pii=False` ; s'ajoutent à la liste noire de clés sensibles du SDK.
 _TERMES_PII = ["forwarded", "-ip", "remote-", "via", "-user"]
 
 #: Ni utilisateur (id, e-mail, IP), ni cookies, ni corps de requête (celui d'un
@@ -57,20 +57,12 @@ DATA_COLLECTION = {
     "url_query_params": {"mode": "denylist", "terms": _TERMES_PII},
     "graphql": {"document": False, "variables": False},
     "gen_ai": {"inputs": False, "outputs": False},
+    "mcp": {"inputs": False, "outputs": False},
     "database_query_data": False,
     "queues": False,
     "stack_frame_variables": {"mode": "denylist"},
     "frame_context_lines": 5,
 }
-
-_SCRUBBER = EventScrubber(send_default_pii=False)
-
-
-def scrub_event(event, hint):
-    """Hook `before_send_transaction` : le nettoyage par liste noire du SDK."""
-    _SCRUBBER.scrub_event(event)
-    return event
-
 
 def before_send(event, hint, argv=None):
     """Hook `before_send` de Sentry. Renvoie l'événement, ou None pour le taire."""
@@ -84,3 +76,40 @@ def before_send(event, hint, argv=None):
 
     event.setdefault("tags", {})["django_command"] = commande
     return event
+
+
+def sentry_init_options():
+    """Les options de `sentry_sdk.init` hors DSN/environnement/échantillonnage.
+
+    Isolées ici pour être testables : en TEST/DEV, `settings` n'initialise pas Sentry.
+    """
+    import logging
+
+    from sentry_sdk.integrations.django import DjangoIntegration
+    from sentry_sdk.integrations.logging import LoggingIntegration
+
+    return {
+        # Ni PII, ni cookies, ni corps de requête : voir DATA_COLLECTION.
+        "data_collection": DATA_COLLECTION,
+        # Le corps d'un checkout porte l'e-mail du client : jamais dans Sentry (M4).
+        "max_request_body_size": "never",
+        # 3.0 passe le défaut à True : un simple message emporterait la pile et
+        # ses variables locales. On garde le comportement de 2.x.
+        "attach_stacktrace": False,
+        "integrations": [
+            # 3.0 trace le cache par défaut : on garde le volume de spans de 2.x.
+            DjangoIntegration(cache_spans=False),
+            # 3.0 n'active plus l'intégration logging, et `event_level` n'y vaut
+            # plus ERROR : sans ceci, `logger.error()` ne créerait plus d'issue.
+            # `level=None` : pas de « Sentry logs », qu'on n'envoyait pas en 2.x.
+            LoggingIntegration(
+                level=None,
+                event_level=logging.ERROR,
+                breadcrumb_level=logging.INFO,
+            ),
+        ],
+        # Étiquette la commande de gestion, et tait le `shell` : une faute de
+        # frappe dans une session d'audit n'est pas une erreur de production.
+        "before_send": before_send,
+        "before_send_span": scrub_span,
+    }

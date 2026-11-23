@@ -60,12 +60,12 @@ def test_existing_tags_are_preserved():
 
 
 def _filtre(valeur):
-    # Le scrubber du SDK substitue un AnnotatedValue dont la valeur est "[Filtered]".
+    # config.sentry_scrub substitue "[Filtered]" (le scrubber de 2.x, un AnnotatedValue).
     return getattr(valeur, "value", valeur) == "[Filtered]"
 
 
 def test_data_collection_ne_collecte_aucune_pii_et_sans_avertissement():
-    """`data_collection` remplace `send_default_pii`, sans rien collecter de plus."""
+    """`data_collection` (3.0 a supprimé `send_default_pii`), sans rien collecter de plus."""
     with warnings.catch_warnings(record=True) as avertissements:
         warnings.simplefilter("always")
         client = sentry_sdk.Client(
@@ -73,16 +73,16 @@ def test_data_collection_ne_collecte_aucune_pii_et_sans_avertissement():
         )
     assert not any("send_default_pii" in str(a.message) for a in avertissements)
     regles = client.options["data_collection"]
-    assert regles["provided_by_user"] is True
     assert regles["user_info"] is False
     assert regles["cookies"] == {"mode": "off"}
     assert regles["http_bodies"] == []
     assert regles["queues"] is False
     assert regles["database_query_data"] is False
+    assert regles["mcp"] == {"inputs": False, "outputs": False}
 
 
 def test_le_scrubber_du_sdk_reste_applique():
-    """`data_collection` coupe l'EventScrubber du SDK : `scrub_event` le rejoue."""
+    """sentry-sdk 3.0 a supprimé l'EventScrubber : `scrub_event` le remplace."""
     evenement = scrub_event(
         {
             "extra": {"password": "hunter2", "page": 3},
