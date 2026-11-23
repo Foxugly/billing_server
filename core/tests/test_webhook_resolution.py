@@ -13,8 +13,7 @@ de l'API 2025+, période sur les items) — c'est l'angle mort qui avait laissé
 passer B2.
 """
 import copy
-from datetime import datetime
-from datetime import timezone as dt_timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -69,7 +68,7 @@ def subscription(**changes):
 
 
 def at(seconds):
-    return datetime.fromtimestamp(1790000000 + seconds, tz=dt_timezone.utc)
+    return datetime.fromtimestamp(1790000000 + seconds, tz=UTC)
 
 
 # --------------------------------------------------------------------- B2 checkout

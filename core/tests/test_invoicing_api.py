@@ -4,6 +4,7 @@ Le module `core.invoicing` a ses propres tests ; ici on verifie ce que la vue
 ajoute : le cloisonnement operateur, la traduction des refus metier en codes
 HTTP utilisables par un formulaire, et l'export comptable.
 """
+from datetime import UTC
 from unittest.mock import patch
 
 import pytest
@@ -34,7 +35,6 @@ def stripe_configure(settings):
 def facture_miree(db):
     """Une facture telle que dj-stripe la mire, avec ce que la console en lit."""
     from datetime import datetime
-    from datetime import timezone as tz
 
     from djstripe.models import Customer, Invoice
 
@@ -46,7 +46,7 @@ def facture_miree(db):
         customer=client_stripe,
         livemode=False,
         metadata={"origin": "direct"},
-        created=datetime(2026, 7, 29, 10, 0, tzinfo=tz.utc),
+        created=datetime(2026, 7, 29, 10, 0, tzinfo=UTC),
         stripe_data={
             "id": "in_1",
             "number": "0001",
