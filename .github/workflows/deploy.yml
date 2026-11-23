@@ -168,14 +168,11 @@ jobs:
           aws-region: eu-west-1
           role-session-name: gh-actions-${{ github.run_id }}
 
-      # Ordre : `restart billing-env-fetch` AVANT le `git reset` du checkout django.
-      # gunicorn / celery / celery-beat ont Requires=billing-env-fetch : systemd
-      # propage le restart et les relance aussitôt. Relancés sur le NOUVEAU code
-      # avec l'ANCIEN venv (deploy.sh n'a pas encore installé le verrou), ils
-      # plantaient au démarrage dès qu'une dépendance arrivait — ModuleNotFoundError
-      # django_otp / AppRegistryNotReady au déploiement de #69 (BILLING-BACKEND-B/C/D).
-      # Relancés sur l'ancien code + ancien venv, ils restent cohérents ;
-      # deploy.sh les relance ensuite sur le nouveau code une fois le verrou installé.
+      # --job-mode=ignore-dependencies : seul billing-env-fetch est relance (relecture SSM).
+      # Sans lui, le restart se propageait via Requires= aux units de l'app, qui demarraient
+      # pendant le `git reset` et importaient le NOUVEAU code avec l'ANCIEN venv
+      # (ModuleNotFoundError 5-10 s, billing 23/11). deploy.sh les relance une seule fois, a
+      # la fin : nouveau code, verrou installe, env relu.
       - name: Trigger deploy on EC2 via SSM
         id: ssm
         env:
@@ -201,7 +198,7 @@ jobs:
             "ln -sf ../sites-available/billing-api.conf /etc/nginx/sites-enabled/billing-api.conf",
             "systemctl daemon-reload",
             "systemctl enable billing-env-fetch billing-gunicorn billing-celery billing-celery-beat",
-            "systemctl restart billing-env-fetch",
+            "systemctl restart --job-mode=ignore-dependencies billing-env-fetch",
             "sudo -u django bash -c 'umask 027; cd '$APP' && git fetch --quiet origin main && git reset --hard --quiet origin/main'",
             "sudo -u django bash $APP/deploy/deploy.sh",
             "nginx -t && systemctl reload nginx"
